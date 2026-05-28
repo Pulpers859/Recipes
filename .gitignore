@@ -1,0 +1,33 @@
+# Xcode / Swift build products
+DerivedData/
+build/
+.build/
+
+# Xcode user state
+*.xcuserstate
+*.xccheckout
+*.xcscmblueprint
+xcuserdata/
+
+# SwiftPM
+.swiftpm/
+Packages/
+
+# Local secrets and environment-specific config
+.env
+.env.*
+!.env.example
+*.local.*
+Secrets.xcconfig
+
+# Python cache / virtualenvs
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# OS / editor clutter
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

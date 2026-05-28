@@ -1,0 +1,344 @@
+import SwiftUI
+import SwiftData
+
+struct MealPlanView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Query(sort: \MealPlan.weekStartDate, order: .reverse) private var mealPlans: [MealPlan]
+    @Query(sort: \Recipe.title) private var allRecipes: [Recipe]
+    @Query private var existingShoppingItems: [ShoppingItem]
+    @Query private var pantryItems: [PantryItem]
+
+    let openShoppingList: () -> Void
+
+    @State private var selectedDay: Int = Calendar.current.component(.weekday, from: Date()) - 1
+    @State private var showAddRecipe = false
+    @State private var selectedSlot: MealSlot = .dinner
+    @State private var recipeSearchText = ""
+    @State private var showShoppingConfirmation = false
+    @State private var generatedItemCount = 0
+
+    private var currentPlan: MealPlan? { mealPlans.first }
+    private let days = MealPlanEntry.shortDayNames
+
+    private var filteredRecipeChoices: [Recipe] {
+        let query = recipeSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return allRecipes }
+
+        let lowerQuery = query.lowercased()
+        return allRecipes.filter { recipe in
+            recipe.title.lowercased().contains(lowerQuery)
+                || recipe.tags.contains(where: { $0.lowercased().contains(lowerQuery) })
+                || recipe.normalizedIngredients.contains(where: { $0.name.lowercased().contains(lowerQuery) })
+        }
+    }
+
+    private var selectedDayName: String {
+        days[selectedDay]
+    }
+
+    private var selectedDayEntriesCount: Int {
+        currentPlan?.entries(for: selectedDay).count ?? 0
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    heroHeader
+                    daySelector
+
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text("\(selectedDayName)'s Plan")
+                            .font(.system(.title3, design: .serif, weight: .bold))
+                            .foregroundStyle(Color.rvInk)
+
+                        ForEach(MealSlot.allCases, id: \.self) { slot in
+                            mealSlotSection(slot)
+                        }
+                    }
+                }
+                .padding()
+                .padding(.bottom, 28)
+            }
+            .background(Color.rvBackground.ignoresSafeArea())
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(Color.rvBackground, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        generateShoppingList()
+                    } label: {
+                        Label("Shopping List", systemImage: "cart.badge.plus")
+                    }
+                    .disabled((currentPlan?.entries.isEmpty ?? true) || allRecipes.isEmpty)
+                }
+            }
+            .sheet(isPresented: $showAddRecipe) {
+                recipePickerSheet
+            }
+            .alert("Shopping List Generated", isPresented: $showShoppingConfirmation) {
+                Button("Go to Shopping List") {
+                    openShoppingList()
+                }
+                Button("Stay Here", role: .cancel) { }
+            } message: {
+                Text("\(generatedItemCount) items added to your shopping list.")
+            }
+        }
+    }
+
+    private var heroHeader: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Meal Plan")
+                .font(.system(.largeTitle, design: .serif, weight: .bold))
+                .foregroundStyle(Color.rvInk)
+
+            Text("Shape the week, then turn it into a shopping list with pantry-aware ingredients.")
+                .font(.subheadline)
+                .foregroundStyle(Color.rvSubtleText)
+
+            HStack(spacing: 12) {
+                summaryPill(title: "Planned Meals", value: "\(currentPlan?.entries.count ?? 0)")
+                summaryPill(title: "Today", value: "\(selectedDayEntriesCount)")
+            }
+        }
+        .padding(22)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(LinearGradient.rvHeroGradient)
+        .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 30, style: .continuous)
+                .stroke(Color.white.opacity(0.6), lineWidth: 1)
+        }
+    }
+
+    private var daySelector: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                ForEach(0..<7, id: \.self) { day in
+                    Button {
+                        selectedDay = day
+                    } label: {
+                        VStack(spacing: 6) {
+                            Text(days[day])
+                                .font(.subheadline.weight(.semibold))
+
+                            let count = currentPlan?.entries(for: day).count ?? 0
+                            Text(count == 0 ? "Open" : "\(count)")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(selectedDay == day ? Color.white.opacity(0.85) : Color.rvSubtleText)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .background {
+                            if selectedDay == day {
+                                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                    .fill(LinearGradient.rvAccentGradient)
+                            } else {
+                                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                    .fill(Color.rvPaper)
+                            }
+                        }
+                        .foregroundStyle(selectedDay == day ? Color.white : Color.rvInk)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private func mealSlotSection(_ slot: MealSlot) -> some View {
+        let entries = currentPlan?.entries(for: selectedDay).filter { $0.mealSlot == slot } ?? []
+
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label(slot.displayName, systemImage: slot.icon)
+                    .font(.system(.title3, design: .serif, weight: .bold))
+                    .foregroundStyle(Color.rvInk)
+
+                Spacer()
+
+                Button {
+                    selectedSlot = slot
+                    showAddRecipe = true
+                } label: {
+                    Label("Add", systemImage: "plus")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(Color.rvSurface, in: Capsule())
+                        .foregroundStyle(Color.rvInk)
+                }
+                .buttonStyle(.plain)
+            }
+
+            if entries.isEmpty {
+                Text("No meal planned for this slot yet.")
+                    .font(.subheadline)
+                    .foregroundStyle(Color.rvSubtleText)
+                    .padding(.vertical, 6)
+            } else {
+                ForEach(entries) { entry in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(entry.recipeTitle)
+                                .font(.headline)
+                                .foregroundStyle(Color.rvInk)
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            Text("\(entry.servings) servings")
+                                .font(.caption)
+                                .foregroundStyle(Color.rvSubtleText)
+                        }
+
+                        Spacer()
+
+                        Button {
+                            removeEntry(entry)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.title3)
+                                .foregroundStyle(Color.rvMuted)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(14)
+                    .background(Color.rvSurface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                }
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.rvPaper)
+        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .stroke(Color.white.opacity(0.7), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.04), radius: 14, y: 7)
+    }
+
+    private func summaryPill(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title.uppercased())
+                .font(.caption2.weight(.bold))
+                .tracking(1)
+                .foregroundStyle(Color.rvSubtleText)
+            Text(value)
+                .font(.title3.bold())
+                .foregroundStyle(Color.rvInk)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white.opacity(0.75), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var recipePickerSheet: some View {
+        NavigationStack {
+            List(filteredRecipeChoices) { recipe in
+                Button {
+                    addEntry(recipe: recipe, slot: selectedSlot)
+                    recipeSearchText = ""
+                    showAddRecipe = false
+                } label: {
+                    HStack {
+                        Image(systemName: recipe.category.icon)
+                            .foregroundStyle(Color.rvAccent)
+                        VStack(alignment: .leading) {
+                            Text(recipe.title)
+                                .font(.subheadline.weight(.medium))
+                                .lineLimit(nil)
+                                .fixedSize(horizontal: false, vertical: true)
+                            if recipe.totalTime > 0 {
+                                Text("\(recipe.totalTime) min")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+                .foregroundStyle(Color.rvInk)
+                .listRowBackground(Color.rvPaper)
+            }
+            .scrollContentBackground(.hidden)
+            .background(Color.rvBackground.ignoresSafeArea())
+            .navigationTitle("Choose Recipe")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(Color.rvBackground, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        recipeSearchText = ""
+                        showAddRecipe = false
+                    }
+                }
+            }
+            .searchable(text: $recipeSearchText, prompt: "Search recipes...")
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func addEntry(recipe: Recipe, slot: MealSlot) {
+        let plan = currentPlan ?? createCurrentPlan()
+        let entry = MealPlanEntry(
+            recipeID: recipe.id,
+            recipeTitle: recipe.title,
+            dayOfWeek: selectedDay,
+            mealSlot: slot,
+            servings: recipe.servings
+        )
+        plan.entries.append(entry)
+        AnalyticsService.shared.track("meal_plan_entry_added", metadata: [
+            "slot": slot.rawValue,
+            "day": "\(selectedDay)"
+        ])
+    }
+
+    private func removeEntry(_ entry: MealPlanEntry) {
+        guard let plan = currentPlan else { return }
+        plan.entries.removeAll { $0.id == entry.id }
+    }
+
+    private func generateShoppingList() {
+        guard let plan = currentPlan else { return }
+
+        let recipeIDs = Set(plan.entries.map { $0.recipeID })
+        let recipes = allRecipes.filter { recipeIDs.contains($0.id) }
+
+        var recipeServings: [UUID: (recipe: Recipe, servings: Int)] = [:]
+        for entry in plan.entries {
+            guard let recipe = recipes.first(where: { $0.id == entry.recipeID }) else { continue }
+            if let existing = recipeServings[recipe.id] {
+                recipeServings[recipe.id] = (recipe, existing.servings + entry.servings)
+            } else {
+                recipeServings[recipe.id] = (recipe, entry.servings)
+            }
+        }
+
+        let entries = Array(recipeServings.values)
+        guard !entries.isEmpty else { return }
+
+        let count = ShoppingListService.regenerateShoppingList(
+            from: entries,
+            existingItems: existingShoppingItems,
+            pantryItems: pantryItems,
+            modelContext: modelContext
+        )
+
+        generatedItemCount = count
+        showShoppingConfirmation = true
+        AnalyticsService.shared.track("shopping_list_generated", metadata: [
+            "count": "\(count)",
+            "planned_recipes": "\(entries.count)"
+        ])
+    }
+
+    private func createCurrentPlan() -> MealPlan {
+        let plan = MealPlan()
+        modelContext.insert(plan)
+        return plan
+    }
+}
