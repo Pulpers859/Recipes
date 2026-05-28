@@ -6,7 +6,7 @@
 - Source-of-truth repo path: `C:\Dev\Recipes`
 - Stale/old copies to ignore if applicable: `C:\Users\Patrick's Computer\OneDrive - WV School of Osteopathic Medicine\Desktop\Recipes`
 - Primary target for normal work if multiple surfaces exist: `Main iOS app`
-- GitHub intent/status: `remote exists; local bootstrap still incomplete`
+- GitHub intent/status: `remote attached and active`
 - GitHub remote: `https://github.com/Pulpers859/Recipes.git`
 
 ## Repo State
@@ -14,11 +14,11 @@
 - Working branch: `dev`
 - Expected default branch for normal work: `dev`
 - Sync-first rule: `Before normal work, fetch from the remote first. If the working tree is clean and the active branch tracks the expected upstream, pull with --ff-only before editing. If local changes exist, fetch and reconcile instead of blindly pulling.`
-- Current observed local state: `This Desktop/OneDrive copy is not a Git repo yet and should be treated as transitional until the project is migrated to C:\Dev\Recipes and bootstrapped there.`
-- If Git is not set up yet for this project, the agent should bootstrap it before doing major feature work.
+- Current observed local state: `C:\Dev\Recipes is now the live Git repo, with main and dev pushed to origin. The Desktop/OneDrive copy should be treated as stale unless explicitly needed for recovery.`
+- Git bootstrap status: `completed locally with repo config, aliases, and a local hook blocking direct commits to main`
 
 ## If No Git Exists Yet
-If `git rev-parse --is-inside-work-tree` fails in the real project root, the agent should help set up the repo using this standard:
+If `git rev-parse --is-inside-work-tree` fails in the real project root, the agent should help re-establish the repo using this standard:
 1. confirm the real project root
 2. migrate the project to `C:\Dev\Recipes` if the current location is still the OneDrive/Desktop copy
 3. initialize local Git
@@ -140,10 +140,10 @@ Stable branch: main
 Working branch: dev
 
 Important:
-- Treat C:\Dev\Recipes as the intended source of truth once migration/bootstrap is complete.
-- Do not keep using the Desktop/OneDrive copy as the long-term working repo unless explicitly asked.
-- This current Desktop snapshot is missing Git metadata and does not include an .xcodeproj file, so verify the full app container before assuming the migration is complete.
-- If Git is not already set up, bootstrap it using the repo standard in this file before major feature work.
+- Treat C:\Dev\Recipes as the source-of-truth repo.
+- Do not keep using the Desktop/OneDrive copy as the working repo unless explicitly asked to inspect a stale copy.
+- main and dev already exist on origin, and normal work should happen on dev.
+- The current tracked snapshot still does not include an .xcodeproj file, so verify the full app container if buildable Xcode project files are expected.
 - Use the standard workflow: investigate directly, fix root causes, audit adjacent risks, run checks, and handle Git when appropriate.
 - Before starting normal work, fetch from origin and sync the active branch first when the working tree is clean. If the repo is dirty, fetch and reconcile instead of pulling blindly.
 - Prioritize recipe correctness, import safety, backup compatibility, and user data protection over broad refactors.
