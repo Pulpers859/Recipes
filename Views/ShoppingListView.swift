@@ -322,6 +322,14 @@ struct ShoppingListView: View {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .stroke(Color.white.opacity(0.7), lineWidth: 1)
         }
+        .contextMenu {
+            Button(role: .destructive) {
+                modelContext.delete(item)
+                AnalyticsService.shared.track("shopping_item_deleted")
+            } label: {
+                Label("Delete Item", systemImage: "trash")
+            }
+        }
     }
 
     private func quantityBadge(for item: ShoppingItem) -> some View {

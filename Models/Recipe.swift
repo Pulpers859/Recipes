@@ -113,8 +113,12 @@ struct Ingredient: Codable, Hashable, Identifiable {
     var displayString: String {
         let amtStr = AmountFormatter.format(amount)
         if amount == 0 && unit.isEmpty { return name }
-        if unit.isEmpty || unit.lowercased() == name.lowercased() { return "\(amtStr) \(name)" }
-        return "\(amtStr) \(unit) \(name)"
+        // Join only non-empty parts so a missing amount never produces a
+        // leading space (e.g. unit "cup" with amount 0).
+        let parts = (unit.isEmpty || unit.lowercased() == name.lowercased())
+            ? [amtStr, name]
+            : [amtStr, unit, name]
+        return parts.filter { !$0.isEmpty }.joined(separator: " ")
     }
     
     static func normalizedList(_ ingredients: [Ingredient]) -> [Ingredient] {

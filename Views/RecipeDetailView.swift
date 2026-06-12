@@ -38,6 +38,10 @@ struct RecipeDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(Color.rvBackground, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
+        // Keep the scaler in sync when the recipe's base servings are edited.
+        .onChange(of: recipe.servings) { _, newValue in
+            targetServings = newValue
+        }
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {

@@ -182,7 +182,7 @@ struct CookingModeView: View {
                 
                 HStack(spacing: 20) {
                     Button {
-                        activeTimers[step.id]?.isRunning.toggle()
+                        toggleTimer(for: step.id)
                     } label: {
                         Image(systemName: state.isRunning ? "pause.circle.fill" : "play.circle.fill")
                             .font(.title)
@@ -205,6 +205,7 @@ struct CookingModeView: View {
                         stepID: step.id,
                         label: step.timerLabel ?? "Timer",
                         total: totalSeconds,
+                        endDate: Date().addingTimeInterval(TimeInterval(totalSeconds)),
                         remaining: totalSeconds
                     )
                     activeTimers[step.id] = state
@@ -223,29 +224,47 @@ struct CookingModeView: View {
         }
     }
     
+    private func toggleTimer(for id: UUID) {
+        guard var state = activeTimers[id] else { return }
+        if state.isRunning {
+            state.remaining = max(0, Int(state.endDate.timeIntervalSinceNow.rounded()))
+            state.isRunning = false
+        } else {
+            state.endDate = Date().addingTimeInterval(TimeInterval(state.remaining))
+            state.isRunning = true
+        }
+        activeTimers[id] = state
+    }
+
     private func startCountdown(for id: UUID) {
         countdownTimers[id]?.invalidate()
-        let timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { timer in
+        // Remaining time is derived from a wall-clock end date, not a tick
+        // counter, so the countdown stays accurate even when ticks are
+        // delayed (scrolling, app briefly backgrounded, screen locked).
+        let timer = Timer(timeInterval: 0.5, repeats: true) { timer in
             guard var state = activeTimers[id] else {
                 timer.invalidate()
                 countdownTimers.removeValue(forKey: id)
                 return
             }
 
-            if state.isRunning {
-                state.remaining -= 1
-                activeTimers[id] = state
+            guard state.isRunning else { return }
 
-                if state.remaining <= 0 {
-                    timer.invalidate()
-                    countdownTimers.removeValue(forKey: id)
-                    activeTimers.removeValue(forKey: id)
-                    HapticFeedback.timerComplete()
-                } else if state.remaining == 10 {
-                    HapticFeedback.timerWarning()
-                }
+            let previousRemaining = state.remaining
+            state.remaining = max(0, Int(state.endDate.timeIntervalSinceNow.rounded()))
+            activeTimers[id] = state
+
+            if state.remaining <= 0 {
+                timer.invalidate()
+                countdownTimers.removeValue(forKey: id)
+                activeTimers.removeValue(forKey: id)
+                HapticFeedback.timerComplete()
+            } else if previousRemaining > 10 && state.remaining <= 10 {
+                HapticFeedback.timerWarning()
             }
         }
+        // .common keeps the timer firing while the user scrolls.
+        RunLoop.main.add(timer, forMode: .common)
         countdownTimers[id] = timer
     }
     
@@ -315,6 +334,7 @@ struct TimerState: Identifiable {
     let stepID: UUID
     let label: String
     let total: Int
+    var endDate: Date
     var remaining: Int
     var isRunning: Bool = true
     

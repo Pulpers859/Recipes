@@ -319,6 +319,23 @@ struct PantryView: View {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .stroke(Color.white.opacity(0.7), lineWidth: 1)
         }
+        .contextMenu {
+            Button(role: .destructive) {
+                deletePantryItem(item)
+            } label: {
+                Label("Delete Item", systemImage: "trash")
+            }
+        }
+    }
+
+    private func deletePantryItem(_ item: PantryItem) {
+        let itemName = item.name
+        let remaining = pantryItems.filter { $0.id != item.id }
+        modelContext.delete(item)
+        if persistPantryChanges(snapshot: remaining) {
+            pantryStatusMessage = "Removed \(itemName) from pantry."
+            AnalyticsService.shared.track("pantry_item_deleted")
+        }
     }
 
     private var emptyState: some View {

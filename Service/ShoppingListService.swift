@@ -36,14 +36,17 @@ class ShoppingListService {
                 let key = mergeKey(name: ingredient.name)
                 
                 if var existing = aggregated[key] {
-                    // Try to combine amounts
-                    let converted = convertToCommonUnit(
+                    // Combine amounts only when the units are actually
+                    // compatible — otherwise adding "3 clove" to "2 cup"
+                    // would silently corrupt the quantity.
+                    if let converted = convertToCommonUnit(
                         amount: ingredient.amount,
                         unit: ingredient.unit,
                         targetUnit: existing.unit
-                    )
-                    existing.amount += converted.amount
-                    existing.unit = converted.unit
+                    ) {
+                        existing.amount += converted.amount
+                        existing.unit = converted.unit
+                    }
                     if !existing.recipeIDs.contains(entry.recipe.id) {
                         existing.recipeIDs.append(entry.recipe.id)
                     }
@@ -87,12 +90,14 @@ class ShoppingListService {
                 if pantry.isStaple {
                     continue
                 }
-                if data.amount > 0, pantry.amount > 0 {
-                    let coverage = convertToCommonUnit(
-                        amount: pantry.amount,
-                        unit: pantry.unit,
-                        targetUnit: data.unit
-                    )
+                // Only reduce by pantry stock when the units convert cleanly;
+                // subtracting across incompatible units understates the list.
+                if data.amount > 0, pantry.amount > 0,
+                   let coverage = convertToCommonUnit(
+                       amount: pantry.amount,
+                       unit: pantry.unit,
+                       targetUnit: data.unit
+                   ) {
                     data.amount = max(0, data.amount - coverage.amount)
                     if data.amount <= 0.0001 {
                         continue
@@ -269,8 +274,9 @@ class ShoppingListService {
     
     /// Try to convert an amount to match the target unit.
     /// If units are compatible (both weight or both volume), converts.
-    /// Otherwise keeps original.
-    private static func convertToCommonUnit(amount: Double, unit: String, targetUnit: String) -> (amount: Double, unit: String) {
+    /// Returns nil when units are incompatible so callers never sum or
+    /// subtract amounts measured in different things.
+    private static func convertToCommonUnit(amount: Double, unit: String, targetUnit: String) -> (amount: Double, unit: String)? {
         let from = normalizeUnit(unit)
         let to = targetUnit
         
@@ -298,10 +304,8 @@ class ShoppingListService {
             return (tsps / toFactor, to)
         }
         
-        // Incompatible units (e.g. "pinch" vs "cup") — keep separate
-        // Return with original unit; they won't merge (different key won't reach here,
-        // but just in case, pick the larger unit)
-        return (amount, from)
+        // Incompatible units (e.g. "pinch" vs "cup") — caller keeps amounts separate
+        return nil
     }
     
     // MARK: - Auto-Categorize

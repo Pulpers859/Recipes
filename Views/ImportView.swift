@@ -311,29 +311,35 @@ struct ImportView: View {
     
     private func handlePhotoSelection(_ item: PhotosPickerItem?) {
         guard let item else { return }
-        
+
         Task {
-            do {
-                guard let data = try await item.loadTransferable(type: Data.self) else { return }
-                guard data.count <= maxPhotoImportBytes else {
-                    await MainActor.run {
-                        parser.lastError = "Image is too large. Please choose a file under 15 MB."
-                    }
-                    return
-                }
-                let recipe = try await parser.parseRecipeFromImage(data, mode: parseMode())
+            await importPhoto(item)
+            // Reset so picking the same photo again still triggers an import.
+            await MainActor.run { selectedPhotoItem = nil }
+        }
+    }
+
+    private func importPhoto(_ item: PhotosPickerItem) async {
+        do {
+            guard let data = try await item.loadTransferable(type: Data.self) else { return }
+            guard data.count <= maxPhotoImportBytes else {
                 await MainActor.run {
-                    modelContext.insert(recipe)
-                    AnalyticsService.shared.track("import_photo_success", metadata: [
-                        "mode": parseModeSetting
-                    ])
-                    importedRecipe = recipe
+                    parser.lastError = "Image is too large. Please choose a file under 15 MB."
                 }
-            } catch {
-                await MainActor.run {
-                    parser.lastError = error.localizedDescription
-                    AnalyticsService.shared.track("import_photo_failed")
-                }
+                return
+            }
+            let recipe = try await parser.parseRecipeFromImage(data, mode: parseMode())
+            await MainActor.run {
+                modelContext.insert(recipe)
+                AnalyticsService.shared.track("import_photo_success", metadata: [
+                    "mode": parseModeSetting
+                ])
+                importedRecipe = recipe
+            }
+        } catch {
+            await MainActor.run {
+                parser.lastError = error.localizedDescription
+                AnalyticsService.shared.track("import_photo_failed")
             }
         }
     }

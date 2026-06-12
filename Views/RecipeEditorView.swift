@@ -261,6 +261,9 @@ struct RecipeEditorView: View {
                 }
             }
         }
+        // A swipe-down would silently discard every edit (or keep an
+        // unreviewed import). Force an explicit Cancel/Save decision.
+        .interactiveDismissDisabled()
     }
     
     // MARK: - Actions
@@ -396,10 +399,10 @@ struct RecipeEditorView: View {
         for item in items {
             do {
                 guard let rawData = try await item.loadTransferable(type: Data.self),
-                      let normalized = normalizedPhotoData(from: rawData) else {
+                      let normalized = ImageDataNormalizer.normalizedJPEGData(from: rawData) else {
                     continue
                 }
-                
+
                 // Avoid duplicate images when a user re-selects the same photo.
                 if !photoData.contains(normalized) {
                     photoData.append(normalized)
@@ -409,25 +412,7 @@ struct RecipeEditorView: View {
             }
         }
     }
-    
-    private func normalizedPhotoData(from data: Data) -> Data? {
-        guard let image = UIImage(data: data) else { return data }
-        
-        let maxDimension: CGFloat = 2000
-        let largestSide = max(image.size.width, image.size.height)
-        let scale = min(1, maxDimension / max(largestSide, 1))
-        let targetSize = CGSize(width: image.size.width * scale, height: image.size.height * scale)
-        
-        let format = UIGraphicsImageRendererFormat.default()
-        format.scale = 1
-        
-        let resized = UIGraphicsImageRenderer(size: targetSize, format: format).image { _ in
-            image.draw(in: CGRect(origin: .zero, size: targetSize))
-        }
-        
-        return resized.jpegData(compressionQuality: 0.85) ?? data
-    }
-    
+
     private func removePhoto(at index: Int) {
         guard photoData.indices.contains(index) else { return }
         photoData.remove(at: index)

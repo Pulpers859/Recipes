@@ -652,6 +652,9 @@ struct RecipeListView: View {
         let toDelete = recipes.filter { selectedRecipeIDs.contains($0.id) }
         let count = toDelete.count
 
+        // Best-effort safety backup of the whole library before a bulk delete.
+        try? RecipeExportService.writeAutomaticBackup(recipes: recipes)
+
         for recipe in toDelete {
             SpotlightIndexingService.shared.removeRecipe(recipe)
             modelContext.delete(recipe)

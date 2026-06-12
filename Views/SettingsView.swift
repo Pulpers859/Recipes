@@ -91,7 +91,7 @@ struct SettingsView: View {
                 } header: {
                     Text("AI Recipe Parsing")
                 } footer: {
-                    Text("You can save a key in-app, provide `ANTHROPIC_API_KEY` in Info.plist/build settings, or set it directly in `AppConfig.swift`. AI parsing sends recipe text to Claude for structured extraction. Manual mode uses local OCR only.")
+                    Text("Save a key in-app (stored securely in the iOS Keychain) or provide `ANTHROPIC_API_KEY` via Info.plist/build settings. Never commit a real key to source control. AI parsing sends recipe text to Claude for structured extraction. Manual mode uses local OCR only.")
                 }
                 
                 // MARK: - Cooking
@@ -267,7 +267,7 @@ struct SettingsView: View {
                 Button("Delete All", role: .destructive) { deleteAllRecipes() }
                 Button("Cancel", role: .cancel) { }
             } message: {
-                Text("This will permanently delete all \(recipes.count) recipe(s). This cannot be undone.")
+                Text("This will permanently delete all \(recipes.count) recipe(s). A safety backup will be saved on this device first.")
             }
         }
     }
@@ -487,10 +487,24 @@ struct SettingsView: View {
     private func deleteAllRecipes() {
         let count = recipes.count
         guard count > 0 else { return }
+
+        // Write a safety backup first so this destructive action is recoverable
+        // via "Import from JSON Backup".
+        var backupSucceeded = true
+        do {
+            try RecipeExportService.writeAutomaticBackup(recipes: recipes)
+        } catch {
+            backupSucceeded = false
+        }
+
         for recipe in recipes {
             modelContext.delete(recipe)
         }
         SpotlightIndexingService.shared.removeAllRecipes()
+
+        importResult = backupSucceeded
+            ? "Deleted \(count) recipes. A safety backup was saved on this device."
+            : "Deleted \(count) recipes. Warning: the safety backup could not be written."
         AnalyticsService.shared.track("recipes_all_deleted", metadata: ["count": "\(count)"])
     }
 

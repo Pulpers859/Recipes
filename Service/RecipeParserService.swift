@@ -112,7 +112,9 @@ class RecipeParserService: ObservableObject {
         let text = try await ocrFromImage(data: imageData)
         let recipe = try await parseSingleText(text, pdfData: nil, mode: mode)
         recipe.sourceType = .image
-        recipe.photoData = [imageData]
+        // OCR uses the full-resolution original; store a downscaled copy so a
+        // 15 MB camera photo doesn't live in the database forever.
+        recipe.photoData = [ImageDataNormalizer.normalizedJPEGData(from: imageData) ?? imageData]
         return recipe
     }
     
@@ -414,23 +416,22 @@ class RecipeParserService: ObservableObject {
     
     private func recognizeText(in image: CGImage) async throws -> String {
         return try await withCheckedThrowingContinuation { continuation in
-            let request = VNRecognizeTextRequest { request, error in
-                if let error = error {
+            // Vision's perform() is synchronous and heavy; run it on a
+            // background queue instead of blocking a concurrency thread.
+            DispatchQueue.global(qos: .userInitiated).async {
+                let request = VNRecognizeTextRequest()
+                request.recognitionLevel = .accurate
+                request.usesLanguageCorrection = true
+
+                let handler = VNImageRequestHandler(cgImage: image, options: [:])
+                do {
+                    try handler.perform([request])
+                    let observations = request.results ?? []
+                    let text = observations.compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
+                    continuation.resume(returning: text)
+                } catch {
                     continuation.resume(throwing: error)
-                    return
                 }
-                let observations = request.results as? [VNRecognizedTextObservation] ?? []
-                let text = observations.compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
-                continuation.resume(returning: text)
-            }
-            request.recognitionLevel = .accurate
-            request.usesLanguageCorrection = true
-            
-            let handler = VNImageRequestHandler(cgImage: image, options: [:])
-            do {
-                try handler.perform([request])
-            } catch {
-                continuation.resume(throwing: error)
             }
         }
     }

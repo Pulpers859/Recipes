@@ -49,6 +49,29 @@ class RecipeExportService {
         return try encoder.encode(wrapper)
     }
     
+    // MARK: - Automatic Safety Backup
+
+    private static let backupDirectoryName = "RecipeVault/Backups"
+    private static let automaticBackupFilename = "RecipeVault-Recipes-Latest.json"
+
+    /// Writes an on-device safety backup so destructive bulk deletes have a
+    /// recovery story. The file is restorable via "Import from JSON Backup".
+    @discardableResult
+    static func writeAutomaticBackup(recipes: [Recipe]) throws -> URL {
+        let documentsDirectory = try FileManager.default.url(
+            for: .documentDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        let backupDirectory = documentsDirectory.appendingPathComponent(backupDirectoryName, isDirectory: true)
+        try FileManager.default.createDirectory(at: backupDirectory, withIntermediateDirectories: true)
+        let backupURL = backupDirectory.appendingPathComponent(automaticBackupFilename)
+        let data = try exportAsJSON(recipes: recipes)
+        try data.write(to: backupURL, options: .atomic)
+        return backupURL
+    }
+
     /// Import recipes from a JSON backup
     static func importFromJSON(data: Data) throws -> [Recipe] {
         let decoder = JSONDecoder()

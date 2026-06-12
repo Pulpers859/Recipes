@@ -42,8 +42,10 @@ class URLRecipeScraperService: ObservableObject {
         let html: String
         if let utf8 = String(data: data, encoding: .utf8) {
             html = utf8
-        } else if let ascii = String(data: data, encoding: .ascii) {
-            html = ascii
+        } else if let latin1 = String(data: data, encoding: .isoLatin1) {
+            // Latin-1 accepts any byte sequence, so legacy-encoded pages
+            // (Windows-1252 etc.) still import instead of failing outright.
+            html = latin1
         } else {
             throw ScraperError.decodeFailed
         }

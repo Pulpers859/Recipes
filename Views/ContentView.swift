@@ -70,6 +70,10 @@ struct ContentView: View {
         .toolbarBackground(Color.rvBackground, for: .tabBar)
         .toolbarBackground(.visible, for: .tabBar)
         .toolbarColorScheme(.light, for: .tabBar)
+        // The warm cream/olive palette is light-only; without this, system
+        // dark mode renders Form-based screens dark while custom screens stay
+        // light, producing an inconsistent, broken-looking mix.
+        .preferredColorScheme(.light)
         .onChange(of: navigationState.spotlightRecipeID) { _, recipeID in
             if recipeID != nil {
                 selectedTab = .recipes
