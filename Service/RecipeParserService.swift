@@ -71,16 +71,22 @@ class RecipeParserService: ObservableObject {
         
         // Step 3: Parse each chunk
         var recipes: [Recipe] = []
+        var skippedChunks = 0
         for (index, chunk) in recipeChunks.enumerated() {
             parseProgress = "Parsing recipe \(index + 1) of \(recipeChunks.count)..."
-            
+
             do {
                 let recipe = try await parseSingleText(chunk, pdfData: nil, mode: mode)
                 recipes.append(recipe)
             } catch {
-                // If one recipe fails, continue with the rest
-                lastError = "Skipped recipe \(index + 1): \(error.localizedDescription)"
+                // If one recipe fails, continue with the rest — but keep an
+                // aggregate count so partial failures aren't silently
+                // overwritten by the next chunk's error.
+                skippedChunks += 1
             }
+        }
+        if skippedChunks > 0 {
+            lastError = "Skipped \(skippedChunks) of \(recipeChunks.count) detected recipe sections that couldn't be parsed."
         }
         
         // If AI batch is available, try batch parsing for better results
@@ -136,10 +142,13 @@ class RecipeParserService: ObservableObject {
     // MARK: - Recipe Boundary Detection
     
     /// Splits page texts into recipe chunks by detecting recipe boundaries.
-    /// Looks for patterns like: recipe titles followed by ingredients/instructions sections.
-    private static let recipeStartRegexes: [NSRegularExpression] = {
+    /// Tuned for macro-style cookbook PDFs where each recipe starts on a page
+    /// listing ingredients alongside macros/calories/servings. Traditional
+    /// cookbooks where one recipe spans pages can still split wrong — the
+    /// import summary tells the user to verify multi-recipe results.
+    private static let ingredientsRegex = try? NSRegularExpression(pattern: #"(?i)ingredients"#)
+    private static let recipeStartSupportRegexes: [NSRegularExpression] = {
         [
-            #"(?i)ingredients"#,
             #"(?i)macros\s*[:%]"#,
             #"(?i)calories\s*[:%]"#,
             #"(?i)servings\s*[:%]"#,
@@ -147,20 +156,21 @@ class RecipeParserService: ObservableObject {
     }()
 
     private func splitIntoRecipeChunks(pageTexts: [String]) -> [String] {
-        let regexes = Self.recipeStartRegexes
-        
-        // Score each page for "looks like a recipe start"
+        // Score each page for "looks like a recipe start". An ingredients
+        // section is required — macros + calories alone also match nutrition
+        // summary or index pages, which used to cause bogus splits.
         var recipeStartPages: [Int] = []
         for (index, pageText) in pageTexts.enumerated() {
             let range = NSRange(pageText.startIndex..., in: pageText)
-            var score = 0
-            for regex in regexes {
-                if regex.firstMatch(in: pageText, range: range) != nil {
-                    score += 1
-                }
+
+            guard Self.ingredientsRegex?.firstMatch(in: pageText, range: range) != nil else {
+                continue
             }
-            // If page has 2+ indicators, it's likely a recipe start
-            if score >= 2 {
+
+            let supportScore = Self.recipeStartSupportRegexes
+                .filter { $0.firstMatch(in: pageText, range: range) != nil }
+                .count
+            if supportScore >= 1 {
                 recipeStartPages.append(index)
             }
         }
@@ -438,45 +448,100 @@ class RecipeParserService: ObservableObject {
     
     // MARK: - Manual Parsing (Offline)
     
+    private enum ManualParseSection {
+        case preamble, ingredients, steps
+    }
+
     private func manualParse(text: String, pdfData: Data?) -> Recipe {
         parseProgress = "Extracting with local parser..."
-        
+
         let lines = text.components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
-        
+
         let title = lines.first ?? "Imported Recipe"
-        
-        let measurementPattern = #"(\d+[\./]?\d*)\s*(cup|cups|tbsp|tsp|oz|lb|lbs|g|kg|ml|l|pinch|clove|cloves|can|cans|package|bunch|stick|sticks|piece|pieces|slices?)s?\b"#
-        let regex = try? NSRegularExpression(pattern: measurementPattern, options: .caseInsensitive)
-        
+
+        let measurementPattern = #"(\d+[\./]?\d*|[¼½¾⅓⅔⅛⅜⅝⅞])\s*(cup|cups|tbsp|tsp|tablespoon|teaspoon|oz|ounce|lb|lbs|pound|g|gram|kg|ml|l|pinch|clove|cloves|can|cans|package|bunch|stick|sticks|piece|pieces|slices?)s?\b"#
+        let measurementRegex = try? NSRegularExpression(pattern: measurementPattern, options: .caseInsensitive)
+        let numberedStepRegex = try? NSRegularExpression(pattern: #"^(\d+[\.\)]\s+|step\s+\d+)"#, options: .caseInsensitive)
+
         var ingredients: [Ingredient] = []
         var stepLines: [String] = []
-        var foundIngredientSection = false
-        
+        var section: ManualParseSection = .preamble
+
+        func isHeader(_ line: String, _ keywords: [String]) -> Bool {
+            let lower = line.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: ":- "))
+            return keywords.contains(lower)
+        }
+
         for line in lines.dropFirst() {
+            // Explicit section headers are the most reliable boundary signal.
+            if isHeader(line, ["ingredients", "ingredient list", "what you need", "you will need"]) {
+                section = .ingredients
+                continue
+            }
+            if isHeader(line, ["instructions", "directions", "method", "steps", "preparation", "how to make it"]) {
+                section = .steps
+                continue
+            }
+
             let range = NSRange(line.startIndex..., in: line)
-            if let _ = regex?.firstMatch(in: line, range: range) {
-                foundIngredientSection = true
-                ingredients.append(Ingredient(name: line, amount: 0, unit: "", section: ""))
-            } else if foundIngredientSection && line.count > 20 {
-                stepLines.append(line)
+            let looksMeasured = measurementRegex?.firstMatch(in: line, range: range) != nil
+            let looksNumberedStep = numberedStepRegex?.firstMatch(in: line, range: range) != nil
+
+            switch section {
+            case .steps:
+                stepLines.append(stripStepNumber(from: line))
+            case .ingredients:
+                if looksNumberedStep {
+                    section = .steps
+                    stepLines.append(stripStepNumber(from: line))
+                } else if looksMeasured {
+                    ingredients.append(IngredientLineParser.parse(line))
+                } else if line.hasSuffix(".") || line.count > 60 {
+                    // Sentence-like lines after the ingredient list are almost
+                    // always instructions even without a header.
+                    section = .steps
+                    stepLines.append(line)
+                } else {
+                    // Short unmeasured line, e.g. "salt and pepper to taste".
+                    ingredients.append(IngredientLineParser.parse(line))
+                }
+            case .preamble:
+                if looksMeasured {
+                    section = .ingredients
+                    ingredients.append(IngredientLineParser.parse(line))
+                } else if looksNumberedStep {
+                    section = .steps
+                    stepLines.append(stripStepNumber(from: line))
+                }
+                // Anything else before the first ingredient is headers,
+                // page furniture, or summary text — skip it.
             }
         }
-        
+
         let steps = stepLines.enumerated().map { idx, text in
             RecipeStep(order: idx + 1, instruction: text)
         }
-        
+
         return Recipe(
             title: title,
             summary: "",
             ingredients: Ingredient.normalizedList(ingredients),
             steps: steps,
             sourceType: .pdf,
-            notes: "Original text:\n\(String(text.prefix(2000)))",
+            notes: "Imported with the basic local parser — double-check ingredients and steps.\n\nOriginal text:\n\(String(text.prefix(2000)))",
             originalPDFData: pdfData
         )
+    }
+
+    private func stripStepNumber(from line: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: #"^(\d+[\.\)]\s+|step\s+\d+[:\.\s]*)"#, options: .caseInsensitive) else {
+            return line
+        }
+        let range = NSRange(line.startIndex..., in: line)
+        let stripped = regex.stringByReplacingMatches(in: line, range: range, withTemplate: "")
+        return stripped.isEmpty ? line : stripped
     }
 }
 

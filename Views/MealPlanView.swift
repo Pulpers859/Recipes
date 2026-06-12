@@ -16,8 +16,20 @@ struct MealPlanView: View {
     @State private var recipeSearchText = ""
     @State private var showShoppingConfirmation = false
     @State private var generatedItemCount = 0
+    /// Weeks relative to the current week (0 = this week, 1 = next week).
+    @State private var weekOffset = 0
 
-    private var currentPlan: MealPlan? { mealPlans.first }
+    private var displayedWeekStart: Date {
+        let thisWeek = MealPlanningService.weekStart()
+        return Calendar.current.date(byAdding: .weekOfYear, value: weekOffset, to: thisWeek) ?? thisWeek
+    }
+
+    /// The plan for the week being viewed — not "most recent plan ever",
+    /// which made the meal plan one eternal week with no rollover.
+    private var currentPlan: MealPlan? {
+        MealPlanningService.plan(forWeekContaining: displayedWeekStart, in: mealPlans)
+    }
+
     private let days = MealPlanEntry.shortDayNames
 
     private var filteredRecipeChoices: [Recipe] {
@@ -45,6 +57,7 @@ struct MealPlanView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     heroHeader
+                    weekSelector
                     daySelector
 
                     VStack(alignment: .leading, spacing: 14) {
@@ -86,6 +99,88 @@ struct MealPlanView: View {
             } message: {
                 Text("\(generatedItemCount) items added to your shopping list.")
             }
+            .onAppear {
+                migrateLegacyPlanIfNeeded()
+            }
+        }
+    }
+
+    private var weekSelector: some View {
+        HStack(spacing: 12) {
+            Button {
+                weekOffset -= 1
+            } label: {
+                Image(systemName: "chevron.left.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(Color.rvAccent)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Previous week")
+
+            VStack(spacing: 2) {
+                Text(weekLabel)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.rvInk)
+                Text(weekRangeText)
+                    .font(.caption)
+                    .foregroundStyle(Color.rvSubtleText)
+            }
+            .frame(maxWidth: .infinity)
+
+            if weekOffset != 0 {
+                Button("This Week") {
+                    weekOffset = 0
+                    selectedDay = Calendar.current.component(.weekday, from: Date()) - 1
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color.rvAccent)
+            }
+
+            Button {
+                weekOffset += 1
+            } label: {
+                Image(systemName: "chevron.right.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(Color.rvAccent)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Next week")
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(Color.rvPaper)
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
+
+    private var weekLabel: String {
+        switch weekOffset {
+        case 0: return "This Week"
+        case 1: return "Next Week"
+        case -1: return "Last Week"
+        default: return weekOffset > 0 ? "\(weekOffset) Weeks Ahead" : "\(-weekOffset) Weeks Ago"
+        }
+    }
+
+    private var weekRangeText: String {
+        let start = displayedWeekStart
+        let end = Calendar.current.date(byAdding: .day, value: 6, to: start) ?? start
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d"
+        return "\(formatter.string(from: start)) – \(formatter.string(from: end))"
+    }
+
+    /// Builds before week navigation kept a single eternal plan whose
+    /// weekStartDate was its creation date. Rebase that plan onto the current
+    /// week once, so existing entries stay visible under week semantics.
+    private func migrateLegacyPlanIfNeeded() {
+        let migrationKey = "meal_plan_week_migration_done"
+        guard !UserDefaults.standard.bool(forKey: migrationKey) else { return }
+        UserDefaults.standard.set(true, forKey: migrationKey)
+
+        if MealPlanningService.plan(forWeekContaining: Date(), in: mealPlans) == nil,
+           let legacyPlan = mealPlans.first,
+           !legacyPlan.entries.isEmpty {
+            legacyPlan.weekStartDate = MealPlanningService.weekStart()
         }
     }
 
@@ -101,7 +196,7 @@ struct MealPlanView: View {
 
             HStack(spacing: 12) {
                 summaryPill(title: "Planned Meals", value: "\(currentPlan?.entries.count ?? 0)")
-                summaryPill(title: "Today", value: "\(selectedDayEntriesCount)")
+                summaryPill(title: selectedDayName, value: "\(selectedDayEntriesCount)")
             }
         }
         .padding(22)
@@ -305,20 +400,7 @@ struct MealPlanView: View {
     private func generateShoppingList() {
         guard let plan = currentPlan else { return }
 
-        let recipeIDs = Set(plan.entries.map { $0.recipeID })
-        let recipes = allRecipes.filter { recipeIDs.contains($0.id) }
-
-        var recipeServings: [UUID: (recipe: Recipe, servings: Int)] = [:]
-        for entry in plan.entries {
-            guard let recipe = recipes.first(where: { $0.id == entry.recipeID }) else { continue }
-            if let existing = recipeServings[recipe.id] {
-                recipeServings[recipe.id] = (recipe, existing.servings + entry.servings)
-            } else {
-                recipeServings[recipe.id] = (recipe, entry.servings)
-            }
-        }
-
-        let entries = Array(recipeServings.values)
+        let entries = MealPlanningService.aggregatedServingEntries(for: plan, recipes: allRecipes)
         guard !entries.isEmpty else { return }
 
         let count = ShoppingListService.regenerateShoppingList(
@@ -337,7 +419,7 @@ struct MealPlanView: View {
     }
 
     private func createCurrentPlan() -> MealPlan {
-        let plan = MealPlan()
+        let plan = MealPlan(weekStartDate: displayedWeekStart)
         modelContext.insert(plan)
         return plan
     }

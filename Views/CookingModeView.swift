@@ -11,6 +11,7 @@ struct CookingModeView: View {
     @State private var activeTimers: [UUID: TimerState] = [:]
     @State private var countdownTimers: [UUID: Timer] = [:]
     @State private var showIngredients = false
+    @State private var showFinishOptions = false
     
     private var sortedSteps: [RecipeStep] {
         recipe.steps.sorted { $0.order < $1.order }
@@ -105,7 +106,7 @@ struct CookingModeView: View {
                                 }
                             } else {
                                 HapticFeedback.timerComplete()
-                                dismiss()
+                                showFinishOptions = true
                             }
                         } label: {
                             Image(systemName: currentStepIndex < sortedSteps.count - 1
@@ -114,6 +115,7 @@ struct CookingModeView: View {
                                 .font(.system(size: 56))
                                 .foregroundStyle(Color.rvAccent)
                         }
+                        .accessibilityLabel(currentStepIndex < sortedSteps.count - 1 ? "Next step" : "Finish cooking")
                     }
                     .padding(.bottom, 40)
                 } else {
@@ -147,6 +149,9 @@ struct CookingModeView: View {
             UIApplication.shared.isIdleTimerDisabled = false
             // Stop countdowns when leaving cooking mode so dismissed timers
             // don't keep ticking (and firing haptics) in the background.
+            // Scheduled notifications for still-running timers are kept on
+            // purpose: the food on the stove doesn't care that the screen
+            // closed, and the alert remains the truth.
             for timer in countdownTimers.values {
                 timer.invalidate()
             }
@@ -160,6 +165,19 @@ struct CookingModeView: View {
                 ingredientSheet
             }
             .presentationDetents([.medium, .large])
+        }
+        // Finishing the last step is the natural moment to record a cook —
+        // previously "Mark as Cooked" only existed buried in the detail menu.
+        .confirmationDialog("Finished cooking?", isPresented: $showFinishOptions, titleVisibility: .visible) {
+            Button("Mark as Cooked & Close") {
+                recipe.timesCooked += 1
+                recipe.dateLastCooked = Date()
+                dismiss()
+            }
+            Button("Close Without Marking") {
+                dismiss()
+            }
+            Button("Keep Cooking", role: .cancel) { }
         }
     }
     
@@ -188,16 +206,19 @@ struct CookingModeView: View {
                             .font(.title)
                             .foregroundStyle(Color.rvAccent)
                     }
-                    
+                    .accessibilityLabel(state.isRunning ? "Pause timer" : "Resume timer")
+
                     Button {
                         countdownTimers[step.id]?.invalidate()
                         countdownTimers.removeValue(forKey: step.id)
                         activeTimers.removeValue(forKey: step.id)
+                        TimerNotificationService.shared.cancelTimerNotification(stepID: step.id)
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .font(.title)
                             .foregroundStyle(.gray)
                     }
+                    .accessibilityLabel("Cancel timer")
                 }
             } else {
                 Button {
@@ -210,6 +231,15 @@ struct CookingModeView: View {
                     )
                     activeTimers[step.id] = state
                     startCountdown(for: step.id)
+                    // A local notification is the only completion signal that
+                    // reaches the cook when the phone is locked or face-down.
+                    TimerNotificationService.shared.requestAuthorizationIfNeeded()
+                    TimerNotificationService.shared.scheduleTimerNotification(
+                        stepID: step.id,
+                        label: state.label,
+                        recipeTitle: recipe.title,
+                        fireDate: state.endDate
+                    )
                     HapticFeedback.buttonTap()
                 } label: {
                     Label(step.timerFormatted ?? "\(totalSeconds)s", systemImage: "timer")
@@ -229,9 +259,16 @@ struct CookingModeView: View {
         if state.isRunning {
             state.remaining = max(0, Int(state.endDate.timeIntervalSinceNow.rounded()))
             state.isRunning = false
+            TimerNotificationService.shared.cancelTimerNotification(stepID: id)
         } else {
             state.endDate = Date().addingTimeInterval(TimeInterval(state.remaining))
             state.isRunning = true
+            TimerNotificationService.shared.scheduleTimerNotification(
+                stepID: id,
+                label: state.label,
+                recipeTitle: recipe.title,
+                fireDate: state.endDate
+            )
         }
         activeTimers[id] = state
     }
@@ -259,6 +296,9 @@ struct CookingModeView: View {
                 countdownTimers.removeValue(forKey: id)
                 activeTimers.removeValue(forKey: id)
                 HapticFeedback.timerComplete()
+                // Completed in foreground — the pending notification would
+                // arrive as a late, confusing banner once backgrounded.
+                TimerNotificationService.shared.cancelTimerNotification(stepID: id)
             } else if previousRemaining > 10 && state.remaining <= 10 {
                 HapticFeedback.timerWarning()
             }

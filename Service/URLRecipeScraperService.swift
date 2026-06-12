@@ -343,64 +343,11 @@ class URLRecipeScraperService: ObservableObject {
         return hours * 60 + minutes
     }
     
-    /// Parse an ingredient string like "2 cups all-purpose flour" into components
+    /// Parse an ingredient string like "2 cups all-purpose flour" into
+    /// components. Entity-decodes first, then defers to the shared parser so
+    /// URL and PDF fallbacks split lines identically.
     private func parseIngredientString(_ str: String) -> Ingredient {
-        let cleaned = cleanHTMLEntities(str.trimmingCharacters(in: .whitespacesAndNewlines))
-        
-        // Pattern: optional amount, optional unit, then name.
-        // The \b after the unit prevents short units from eating the start of
-        // ingredient names ("2 garlic" must not parse as unit "g" + "arlic").
-        let pattern = #"^([\d\s¼½¾⅓⅔⅛⅜⅝⅞/.-]+)?\s*(?:(cups?|tbsp|tsp|tablespoons?|teaspoons?|oz|ounces?|lbs?|pounds?|g|grams?|kg|ml|liters?|l|pinch|cloves?|cans?|packages?|bunche?s?|sticks?|pieces?|slices?|heads?)\b)?\s*[.,]?\s*(.+)"#
-        
-        if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) {
-            let range = NSRange(cleaned.startIndex..., in: cleaned)
-            if let match = regex.firstMatch(in: cleaned, range: range) {
-                let amountStr = match.range(at: 1).location != NSNotFound
-                    ? (Range(match.range(at: 1), in: cleaned).map { String(cleaned[$0]).trimmingCharacters(in: .whitespaces) } ?? "")
-                    : ""
-                let unit = match.range(at: 2).location != NSNotFound
-                    ? (Range(match.range(at: 2), in: cleaned).map { String(cleaned[$0]).trimmingCharacters(in: .whitespaces) } ?? "")
-                    : ""
-                let name = match.range(at: 3).location != NSNotFound
-                    ? (Range(match.range(at: 3), in: cleaned).map { String(cleaned[$0]).trimmingCharacters(in: .whitespaces) } ?? cleaned)
-                    : cleaned
-                
-                let amount = parseFractionAmount(amountStr)
-                
-                return Ingredient(name: name, amount: amount, unit: unit)
-            }
-        }
-        
-        return Ingredient(name: cleaned)
-    }
-    
-    /// Convert fraction strings to Double: "1 1/2" → 1.5, "¾" → 0.75
-    private func parseFractionAmount(_ str: String) -> Double {
-        let fractionMap: [Character: Double] = [
-            "¼": 0.25, "½": 0.5, "¾": 0.75,
-            "⅓": 0.333, "⅔": 0.667,
-            "⅛": 0.125, "⅜": 0.375, "⅝": 0.625, "⅞": 0.875
-        ]
-        
-        var total: Double = 0
-        let parts = str.split(separator: " ")
-        
-        for part in parts {
-            if let unicodeFrac = part.first, let val = fractionMap[unicodeFrac] {
-                total += val
-            } else if part.contains("/") {
-                let fracParts = part.split(separator: "/")
-                if fracParts.count == 2,
-                   let num = Double(fracParts[0]),
-                   let den = Double(fracParts[1]), den > 0 {
-                    total += num / den
-                }
-            } else if let num = Double(part) {
-                total += num
-            }
-        }
-        
-        return total
+        IngredientLineParser.parse(cleanHTMLEntities(str))
     }
     
     /// Strip HTML tags from a string

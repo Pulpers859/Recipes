@@ -276,6 +276,7 @@ struct ShoppingListView: View {
             }
             .buttonStyle(.plain)
             .padding(.top, 2)
+            .accessibilityLabel(item.isChecked ? "Mark \(item.name) as not picked up" : "Mark \(item.name) as picked up")
 
             if item.hasQuantity {
                 quantityBadge(for: item)
@@ -477,10 +478,7 @@ struct ShoppingListView: View {
             ShoppingListService.normalizedIngredientKey($0.name) == normalizedKey
         }) {
             let incomingAmount = shoppingItem.amount > 0 ? shoppingItem.amount : 1
-            pantryMatch.amount += incomingAmount
-            if pantryMatch.unit.isEmpty {
-                pantryMatch.unit = shoppingItem.unit
-            }
+            pantryMatch.absorbStock(amount: incomingAmount, unit: shoppingItem.unit)
             pantryMatch.category = shoppingItem.category
             pantryMatch.dateUpdated = Date()
         } else {
@@ -544,7 +542,8 @@ struct ShoppingListView: View {
     }
 
     private func parseAmountToken(_ token: String) -> Double? {
-        if let direct = Double(token) {
+        // flexibleDouble accepts comma decimals ("1,5") for non-US locales.
+        if let direct = IngredientLineParser.flexibleDouble(token) {
             return direct
         }
         return parseFraction(token)

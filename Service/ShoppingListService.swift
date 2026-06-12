@@ -152,63 +152,74 @@ class ShoppingListService {
         }
     }
     
+    /// Generic preparation/quality qualifiers that don't change what you buy.
+    /// English-only by design — the whole app currently is. Brand names do
+    /// not belong in this list; they get handled by the suffix rules below
+    /// (" or similar", " of choice") when recipes phrase them that way.
+    private static let qualifierPrefixes = [
+        "liquid ", "fresh ", "dried ", "large ", "small ", "medium ",
+        "chopped ", "diced ", "minced ", "sliced ", "shredded ", "grated ",
+        "fat-free ", "fat free ", "nonfat ", "non-fat ", "low-fat ", "lowfat ",
+        "low calorie ", "low-calorie ", "reduced fat ", "reduced-fat ",
+        "uncured ", "lean ", "plain ", "raw ", "cooked ", "frozen ",
+        "light ", "sugar-free ", "sugar free ", "whole wheat ",
+    ]
+
+    private static let qualifierSuffixes = [
+        ", divided", ", to taste", " to taste", "(optional)", ", diced",
+        ", chopped", ", sliced", ", minced",
+        " or similar", " of choice",
+    ]
+
+    /// Substring → canonical replacements. Self-mapping entries are not
+    /// no-ops: "sharp cheddar cheese" matching "cheddar cheese" collapses to
+    /// the canonical form. First match wins.
+    private static let synonyms: [(pattern: String, canonical: String)] = [
+        ("egg whites?$", "egg whites"),
+        ("^eggs?$", "eggs"),
+        ("whole milk", "milk"),
+        ("milk of choice", "milk"),
+        ("brown sugar", "brown sugar"),
+        ("powdered sugar", "powdered sugar"),
+        ("salt & pepper.*", "salt & pepper"),
+        ("salt and pepper.*", "salt & pepper"),
+        ("cheddar cheese", "cheddar cheese"),
+        ("mozzarella cheese", "mozzarella cheese"),
+        ("cream cheese", "cream cheese"),
+        ("greek yogurt", "greek yogurt"),
+    ]
+
     private static func mergeKey(name: String) -> String {
         var s = name.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        
+
         // Strip leading amounts that might be baked into the name (e.g. "150g liquid egg whites")
         // Pattern: optional number+unit at the start
         if let regex = try? NSRegularExpression(pattern: #"^\d+[\./]?\d*\s*(g|oz|ml|lb|kg|cups?|tbsp|tsp)\s+"#, options: .caseInsensitive) {
             s = regex.stringByReplacingMatches(in: s, range: NSRange(s.startIndex..., in: s), withTemplate: "")
         }
-        
-        // Strip qualifiers that don't change what you buy
-        let stripPrefixes = [
-            "liquid ", "fresh ", "dried ", "large ", "small ", "medium ",
-            "chopped ", "diced ", "minced ", "sliced ", "shredded ", "grated ",
-            "fat-free ", "fat free ", "nonfat ", "non-fat ", "low-fat ", "lowfat ",
-            "low calorie ", "low-calorie ", "reduced fat ", "reduced-fat ",
-            "uncured ", "lean ", "plain ", "raw ", "cooked ", "frozen ",
-            "light ", "sugar-free ", "sugar free ", "whole wheat ",
-            "mission ", "king's hawaiian or similar ",
-        ]
-        for prefix in stripPrefixes {
-            if s.hasPrefix(prefix) {
+
+        // Strip qualifier prefixes until stable, so "chopped fresh basil" and
+        // "fresh chopped basil" both reduce to "basil" regardless of order.
+        var strippedSomething = true
+        while strippedSomething {
+            strippedSomething = false
+            for prefix in qualifierPrefixes where s.hasPrefix(prefix) {
                 s = String(s.dropFirst(prefix.count))
+                strippedSomething = true
             }
         }
-        
-        // Strip trailing qualifiers
-        let stripSuffixes = [
-            ", divided", ", to taste", " to taste", "(optional)", ", diced",
-            ", chopped", ", sliced", ", minced",
-            " or similar", " of choice",
-        ]
-        for suffix in stripSuffixes {
-            if s.hasSuffix(suffix) {
+
+        // Same for trailing qualifiers ("chicken breast, diced, divided").
+        strippedSomething = true
+        while strippedSomething {
+            strippedSomething = false
+            for suffix in qualifierSuffixes where s.hasSuffix(suffix) {
                 s = String(s.dropLast(suffix.count))
+                s = s.trimmingCharacters(in: .whitespaces)
+                strippedSomething = true
             }
         }
-        
-        // Normalize common ingredient synonyms
-        let synonyms: [(pattern: String, canonical: String)] = [
-            ("egg whites?$", "egg whites"),
-            ("liquid egg whites?", "egg whites"),
-            ("^eggs?$", "eggs"),
-            ("whole milk", "milk"),
-            ("milk of choice", "milk"),
-            ("brown sugar", "brown sugar"),
-            ("powdered sugar", "powdered sugar"),
-            ("salt & pepper.*", "salt & pepper"),
-            ("salt and pepper.*", "salt & pepper"),
-            ("cheddar cheese", "cheddar cheese"),
-            ("mozzarella cheese", "mozzarella cheese"),
-            ("cream cheese", "cream cheese"),
-            ("greek yogurt", "greek yogurt"),
-            ("vanilla greek yogurt", "greek yogurt"),
-            ("nonfat greek yogurt", "greek yogurt"),
-            ("plain greek yogurt", "greek yogurt"),
-        ]
-        
+
         for syn in synonyms {
             if let regex = try? NSRegularExpression(pattern: syn.pattern, options: .caseInsensitive) {
                 let range = NSRange(s.startIndex..., in: s)
@@ -218,7 +229,7 @@ class ShoppingListService {
                 }
             }
         }
-        
+
         return s.trimmingCharacters(in: .whitespacesAndNewlines)
     }
     
@@ -276,7 +287,8 @@ class ShoppingListService {
     /// If units are compatible (both weight or both volume), converts.
     /// Returns nil when units are incompatible so callers never sum or
     /// subtract amounts measured in different things.
-    private static func convertToCommonUnit(amount: Double, unit: String, targetUnit: String) -> (amount: Double, unit: String)? {
+    /// Internal (not private) so unit tests can cover the conversion table.
+    static func convertToCommonUnit(amount: Double, unit: String, targetUnit: String) -> (amount: Double, unit: String)? {
         let from = normalizeUnit(unit)
         let to = targetUnit
         

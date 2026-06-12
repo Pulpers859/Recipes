@@ -90,10 +90,13 @@ struct ImportView: View {
                     }
                     
                     if !parser.hasAPIKey {
-                        Text("Add your Claude API key in Settings for smart recipe extraction")
+                        // Be honest about fallback quality: the local parser
+                        // is heuristic and routinely needs hand-cleanup.
+                        Text("Without an API key, imports use a basic local parser — ingredient amounts and steps usually need manual cleanup afterward. Add a Claude API key in Settings for accurate extraction.")
                             .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.orange)
                             .multilineTextAlignment(.center)
+                            .padding(.horizontal)
                     }
                 }
                 .padding()
@@ -121,7 +124,9 @@ struct ImportView: View {
             .alert("Import Complete", isPresented: $showImportSummary) {
                 Button("OK") { dismiss() }
             } message: {
-                Text("Successfully imported \(importedCount) recipes from this PDF. You can review and edit each one from the Recipes tab.")
+                // Multi-recipe splitting is heuristic; say so instead of
+                // implying every recipe came through cleanly.
+                Text("Imported \(importedCount) recipes from this PDF. Splitting a multi-recipe PDF is approximate — open each recipe in the Recipes tab and check that nothing was merged or cut off.")
             }
         }
     }

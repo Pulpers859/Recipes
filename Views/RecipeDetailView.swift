@@ -94,16 +94,28 @@ struct RecipeDetailView: View {
         }
         .alert("Delete Recipe?", isPresented: $showDeleteConfirmation) {
             Button("Delete", role: .destructive) {
-                SpotlightIndexingService.shared.removeRecipe(recipe)
-                modelContext.delete(recipe)
+                deleteRecipe()
             }
             Button("Cancel", role: .cancel) { }
         } message: {
-            Text("This cannot be undone.")
+            Text("This also removes it from your meal plan. A safety backup of your library is saved on this device first.")
         }
         .sheet(isPresented: $showShareRecipe) {
             RecipeShareView(recipe: recipe)
         }
+    }
+
+    // MARK: - Actions
+
+    private func deleteRecipe() {
+        // Best-effort safety backup so a mistaken delete is recoverable via
+        // "Import from JSON Backup" — there is no undo.
+        if let allRecipes = try? modelContext.fetch(FetchDescriptor<Recipe>()) {
+            try? RecipeExportService.writeAutomaticBackup(recipes: allRecipes)
+        }
+        MealPlanningService.removeEntries(forRecipeIDs: [recipe.id], modelContext: modelContext)
+        SpotlightIndexingService.shared.removeRecipe(recipe)
+        modelContext.delete(recipe)
     }
 
     // MARK: - Photos
@@ -367,16 +379,24 @@ struct RecipeDetailView: View {
                     .font(.system(.title3, design: .serif, weight: .bold))
                     .foregroundStyle(Color.rvInk)
 
+                // Buttons (not tap gestures) so VoiceOver users can actually
+                // rate recipes; gestures on Images are invisible to it.
                 HStack(spacing: 8) {
                     ForEach(1...5, id: \.self) { star in
-                        Image(systemName: star <= recipe.rating ? "star.fill" : "star")
-                            .font(.title3)
-                            .foregroundStyle(star <= recipe.rating ? Color.rvAccent : Color.rvMuted.opacity(0.55))
-                            .onTapGesture {
-                                recipe.rating = star == recipe.rating ? 0 : star
-                            }
+                        Button {
+                            recipe.rating = star == recipe.rating ? 0 : star
+                        } label: {
+                            Image(systemName: star <= recipe.rating ? "star.fill" : "star")
+                                .font(.title3)
+                                .foregroundStyle(star <= recipe.rating ? Color.rvAccent : Color.rvMuted.opacity(0.55))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("\(star) star\(star == 1 ? "" : "s")")
+                        .accessibilityAddTraits(star <= recipe.rating ? .isSelected : [])
                     }
                 }
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel(recipe.rating > 0 ? "Rating: \(recipe.rating) of 5 stars" : "Not rated")
             }
         }
     }

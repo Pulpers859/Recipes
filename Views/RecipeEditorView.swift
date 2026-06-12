@@ -180,7 +180,9 @@ struct RecipeEditorView: View {
                         guard !newIngredientName.isEmpty else { return }
                         let ing = Ingredient(
                             name: newIngredientName,
-                            amount: Double(newIngredientAmount) ?? 0,
+                            // flexibleDouble accepts comma decimals for
+                            // non-US locales where Double("1,5") is nil.
+                            amount: IngredientLineParser.flexibleDouble(newIngredientAmount) ?? 0,
                             unit: newIngredientUnit
                         )
                         ingredients.append(ing)

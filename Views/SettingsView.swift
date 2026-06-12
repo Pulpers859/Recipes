@@ -497,6 +497,13 @@ struct SettingsView: View {
             backupSucceeded = false
         }
 
+        // Meal-plan entries for deleted recipes would linger in the plan UI
+        // but silently drop out of shopping-list generation.
+        MealPlanningService.removeEntries(
+            forRecipeIDs: Set(recipes.map { $0.id }),
+            modelContext: modelContext
+        )
+
         for recipe in recipes {
             modelContext.delete(recipe)
         }

@@ -20,7 +20,11 @@ struct PantryView: View {
     @State private var shareURL: URL?
     @State private var showClearAllConfirm = false
 
-    private var currentPlan: MealPlan? { mealPlans.first }
+    /// The plan for the current calendar week, matching MealPlanView's
+    /// week-scoped semantics (not "most recent plan ever created").
+    private var currentPlan: MealPlan? {
+        MealPlanningService.plan(forWeekContaining: Date(), in: mealPlans)
+    }
     private var checkedShoppingItems: [ShoppingItem] { shoppingItems.filter { $0.isChecked } }
     private var activePantryCoverageCount: Int { pantryItems.filter { $0.isStaple || $0.amount > 0 }.count }
     private var pantryBackupFingerprint: String {
@@ -425,23 +429,20 @@ struct PantryView: View {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else { return }
 
-        let parsedAmount = Double(amount) ?? 0
+        let parsedAmount = IngredientLineParser.flexibleDouble(amount) ?? 0
         let normalizedUnit = unit.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedKey = ShoppingListService.normalizedIngredientKey(trimmedName)
 
         if let existing = pantryItems.first(where: {
             ShoppingListService.normalizedIngredientKey($0.name) == normalizedKey
         }) {
-            if parsedAmount > 0 {
-                existing.amount += parsedAmount
-            }
-            if existing.unit.isEmpty {
-                existing.unit = normalizedUnit
-            }
+            let absorbed = existing.absorbStock(amount: parsedAmount, unit: normalizedUnit)
             existing.category = selectedCategory
             existing.isStaple = existing.isStaple || markAsStaple
             existing.dateUpdated = Date()
-            pantryStatusMessage = "Updated \(existing.name)."
+            pantryStatusMessage = absorbed
+                ? "Updated \(existing.name)."
+                : "Updated \(existing.name) — kept existing quantity because the units differ (\(existing.unit) vs \(normalizedUnit))."
         } else {
             let item = PantryItem(
                 name: trimmedName,
@@ -506,10 +507,7 @@ struct PantryView: View {
                 ShoppingListService.normalizedIngredientKey($0.name) == normalizedKey
             }) {
                 let incomingAmount = shoppingItem.amount > 0 ? shoppingItem.amount : 1
-                pantryMatch.amount += incomingAmount
-                if pantryMatch.unit.isEmpty {
-                    pantryMatch.unit = shoppingItem.unit
-                }
+                pantryMatch.absorbStock(amount: incomingAmount, unit: shoppingItem.unit)
                 pantryMatch.category = shoppingItem.category
                 pantryMatch.dateUpdated = Date()
                 updated += 1
@@ -538,24 +536,11 @@ struct PantryView: View {
 
     private func refreshShoppingListWithPantry() {
         guard let plan = currentPlan else {
-            pantryStatusMessage = "Create a meal plan first, then refresh your shopping list."
+            pantryStatusMessage = "Plan meals for this week first, then refresh your shopping list."
             return
         }
 
-        let recipeIDs = Set(plan.entries.map { $0.recipeID })
-        let plannedRecipes = allRecipes.filter { recipeIDs.contains($0.id) }
-
-        var recipeServings: [UUID: (recipe: Recipe, servings: Int)] = [:]
-        for entry in plan.entries {
-            guard let recipe = plannedRecipes.first(where: { $0.id == entry.recipeID }) else { continue }
-            if let existing = recipeServings[recipe.id] {
-                recipeServings[recipe.id] = (recipe, existing.servings + entry.servings)
-            } else {
-                recipeServings[recipe.id] = (recipe, entry.servings)
-            }
-        }
-
-        let entries = Array(recipeServings.values)
+        let entries = MealPlanningService.aggregatedServingEntries(for: plan, recipes: allRecipes)
         guard !entries.isEmpty else {
             pantryStatusMessage = "No planned recipes found to build a shopping list."
             return

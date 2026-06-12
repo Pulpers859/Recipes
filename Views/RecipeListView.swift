@@ -9,6 +9,9 @@ struct RecipeListView: View {
     @Query(sort: \PantryItem.name) private var pantryItems: [PantryItem]
 
     @State private var searchText = ""
+    /// Search filtering runs against this, updated ~250ms after typing stops,
+    /// so the whole library isn't re-filtered on every keystroke.
+    @State private var debouncedSearchText = ""
     @State private var selectedCategory: RecipeCategory?
     @State private var showingImportSheet = false
     @State private var showingAddRecipe = false
@@ -32,13 +35,15 @@ struct RecipeListView: View {
     private var filteredRecipes: [Recipe] {
         var result = recipes
 
-        if !searchText.isEmpty {
-            let query = searchText.lowercased()
+        if !debouncedSearchText.isEmpty {
+            let query = debouncedSearchText.lowercased()
+            // Search raw ingredient names: normalizedIngredients rebuilds and
+            // re-trims the whole list per recipe, which is wasted work here.
             result = result.filter {
                 $0.title.lowercased().contains(query) ||
                 $0.cuisine.lowercased().contains(query) ||
                 $0.tags.contains(where: { $0.lowercased().contains(query) }) ||
-                $0.normalizedIngredients.contains(where: { $0.name.lowercased().contains(query) })
+                $0.ingredients.contains(where: { $0.name.lowercased().contains(query) })
             }
         }
 
@@ -145,10 +150,20 @@ struct RecipeListView: View {
             .onAppear {
                 routePendingSpotlightRecipe()
                 // Keep the system Spotlight index in sync with the library so
-                // recipes are actually findable from iOS search.
+                // recipes are actually findable from iOS search. Full reindex
+                // happens once per launch; saves/deletes update incrementally.
                 if !recipes.isEmpty {
-                    SpotlightIndexingService.shared.indexAllRecipes(recipes)
+                    SpotlightIndexingService.shared.indexAllRecipesIfNeeded(recipes)
                 }
+            }
+            .task(id: searchText) {
+                // Debounce: cancelled (throws) when searchText changes again.
+                if searchText.isEmpty {
+                    debouncedSearchText = ""
+                    return
+                }
+                guard (try? await Task.sleep(for: .milliseconds(250))) != nil else { return }
+                debouncedSearchText = searchText
             }
             .onChange(of: navigationState.spotlightRecipeID) { _, newID in
                 pendingSpotlightRecipeID = newID
@@ -655,6 +670,10 @@ struct RecipeListView: View {
         // Best-effort safety backup of the whole library before a bulk delete.
         try? RecipeExportService.writeAutomaticBackup(recipes: recipes)
 
+        // Drop meal-plan entries pointing at the deleted recipes so plans
+        // don't keep showing meals that can no longer generate shopping items.
+        MealPlanningService.removeEntries(forRecipeIDs: selectedRecipeIDs, modelContext: modelContext)
+
         for recipe in toDelete {
             SpotlightIndexingService.shared.removeRecipe(recipe)
             modelContext.delete(recipe)
@@ -844,12 +863,23 @@ struct RecipeCardView: View {
                 .stroke(Color.white.opacity(0.7), lineWidth: 1)
         }
         .shadow(color: .black.opacity(0.06), radius: 16, y: 8)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilitySummary)
+    }
+
+    private var accessibilitySummary: String {
+        var parts = [recipe.title, recipe.category.displayName]
+        if recipe.totalTime > 0 { parts.append("\(recipe.totalTime) minutes") }
+        if recipe.rating > 0 { parts.append("rated \(recipe.rating) of 5") }
+        if recipe.isFavorite { parts.append("favorite") }
+        if selectionMode { parts.append(isSelected ? "selected" : "not selected") }
+        return parts.joined(separator: ", ")
     }
 
     @ViewBuilder
     private var thumbnailView: some View {
         if let firstPhoto = recipe.photoData.first,
-           let image = UIImage(data: firstPhoto) {
+           let image = RecipeThumbnailCache.shared.thumbnail(for: firstPhoto, recipeID: recipe.id) {
             Image(uiImage: image)
                 .resizable()
                 .scaledToFill()

@@ -35,4 +35,31 @@ final class PantryItem {
             .filter { !$0.isEmpty }
             .joined(separator: " ")
     }
+
+    /// Adds incoming stock only when the units agree (or one side has no
+    /// unit), so "2 cups" never silently absorbs "2 lb" into a meaningless
+    /// total. Returns false when the units conflicted and nothing was added.
+    @discardableResult
+    func absorbStock(amount incomingAmount: Double, unit incomingUnit: String) -> Bool {
+        guard incomingAmount > 0 else { return true }
+
+        let existingUnit = unit.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let newUnit = incomingUnit.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        if amount <= 0 {
+            amount = incomingAmount
+            if existingUnit.isEmpty { unit = incomingUnit }
+            dateUpdated = Date()
+            return true
+        }
+
+        if existingUnit == newUnit || newUnit.isEmpty || existingUnit.isEmpty {
+            amount += incomingAmount
+            if existingUnit.isEmpty { unit = incomingUnit }
+            dateUpdated = Date()
+            return true
+        }
+
+        return false
+    }
 }

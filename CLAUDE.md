@@ -14,7 +14,10 @@ Recipe Vault is a small SwiftUI + SwiftData iOS app. Optimize for recipe correct
 - `Service/RecipeParserService.swift`: PDF/image OCR, AI/manual parsing, multi-recipe splitting
 - `Service/URLRecipeScraperService.swift`: JSON-LD scrape, AI fallback, URL safety rules
 - `Service/RecipeExportService.swift`, `PantryBackupService.swift`, `RecipeConflictResolverService.swift`: backup/import/export/dedupe safety
+- `Service/MealPlanningService.swift`: week-scoped plan lookup, planned-servings aggregation, meal-plan entry cleanup on recipe delete
+- `Service/IngredientLineParser.swift`: shared free-text ingredient parsing used by both URL and PDF fallbacks
 - `Service/AppDataStack.swift`, `AnalyticsService.swift`, `KeychainService.swift`, `AppConfig.swift`: persistence, crash clues, secrets, app config
+- `RecipeVaultTests/`: unit tests for the parsing heuristics (not yet runnable — needs a test target once the .xcodeproj exists)
 - `extract_*.py`: migration/import utilities; treat them as compatibility surfaces, not throwaway scripts
 
 ## Real Failure Modes

@@ -24,6 +24,13 @@ enum RecipeConflictResolverService {
 
             for duplicate in duplicates {
                 merge(source: duplicate, into: canonical)
+                // Planned meals pointing at the duplicate follow the merged
+                // recipe instead of silently orphaning.
+                MealPlanningService.retargetEntries(
+                    fromRecipeID: duplicate.id,
+                    to: canonical,
+                    modelContext: modelContext
+                )
                 SpotlightIndexingService.shared.removeRecipe(duplicate)
                 modelContext.delete(duplicate)
                 deletedDuplicates += 1
