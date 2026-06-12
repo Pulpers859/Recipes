@@ -12,7 +12,6 @@ struct ImportView: View {
     @State private var selectedTab: ImportTab = .pdf
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var importedRecipe: Recipe?
-    @State private var showEditor = false
     @State private var showFilePicker = false
     @State private var urlText = ""
     @StateObject private var scraper = URLRecipeScraperService()
@@ -114,11 +113,9 @@ struct ImportView: View {
                     showFilePicker = false
                 }
             }
-            .sheet(isPresented: $showEditor) {
-                if let recipe = importedRecipe {
-                    NavigationStack {
-                        RecipeEditorView(recipe: recipe, isNewImport: true)
-                    }
+            .sheet(item: $importedRecipe) { recipe in
+                NavigationStack {
+                    RecipeEditorView(recipe: recipe, isNewImport: true)
                 }
             }
             .alert("Import Complete", isPresented: $showImportSummary) {
@@ -219,7 +216,6 @@ struct ImportView: View {
                                     "mode": parseModeSetting
                                 ])
                                 importedRecipe = recipe
-                                showEditor = true
                                 urlText = ""
                             } catch {
                                 scraper.lastError = error.localizedDescription
@@ -298,7 +294,6 @@ struct ImportView: View {
                     if recipes.count == 1 {
                         // Single recipe — open editor for review
                         importedRecipe = recipes.first
-                        showEditor = true
                     } else {
                         // Multiple recipes — show summary
                         importedCount = recipes.count
@@ -333,7 +328,6 @@ struct ImportView: View {
                         "mode": parseModeSetting
                     ])
                     importedRecipe = recipe
-                    showEditor = true
                 }
             } catch {
                 await MainActor.run {

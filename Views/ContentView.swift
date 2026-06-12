@@ -5,6 +5,8 @@ struct ContentView: View {
     @EnvironmentObject private var navigationState: AppNavigationState
     
     @State private var selectedTab: Tab = .recipes
+    @State private var showDatabaseError = false
+    @State private var databaseErrorMessage = ""
     
     enum Tab: String, CaseIterable {
         case recipes, mealPlan, pantry, shopping, settings
@@ -72,6 +74,17 @@ struct ContentView: View {
             if recipeID != nil {
                 selectedTab = .recipes
             }
+        }
+        .onAppear {
+            if let message = UserDefaults.standard.string(forKey: "database_error") {
+                databaseErrorMessage = message
+                showDatabaseError = true
+            }
+        }
+        .alert("Recipe Storage Problem", isPresented: $showDatabaseError) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("Your recipe database could not be opened, so the app is running on temporary storage. Changes made in this session will NOT be saved. Restart the app — if this keeps happening, export a backup of anything important and reinstall.\n\nDetails: \(databaseErrorMessage)")
         }
     }
 }

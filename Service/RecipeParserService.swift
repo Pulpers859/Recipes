@@ -20,7 +20,7 @@ class RecipeParserService: ObservableObject {
     var hasAPIKey: Bool { !apiKey.isEmpty }
 
     private var modelID: String {
-        UserDefaults.standard.string(forKey: "ai_model_id") ?? "claude-sonnet-4-20250514"
+        AIModelSettings.currentModelID
     }
 
     private let urlSession: URLSession = {

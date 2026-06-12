@@ -18,7 +18,11 @@ enum AppDataStack {
         )
 
         do {
-            return try ModelContainer(for: schema, configurations: config)
+            let container = try ModelContainer(for: schema, configurations: config)
+            // Clear any stale failure flag from a previous launch so the UI
+            // doesn't warn about a problem that has since resolved.
+            UserDefaults.standard.removeObject(forKey: "database_error")
+            return container
         } catch {
             let message = "Failed to open recipe database: \(error.localizedDescription)"
             #if DEBUG

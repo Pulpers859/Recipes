@@ -129,7 +129,8 @@ class URLRecipeScraperService: ObservableObject {
             throw ScraperError.notRecipeType
         }
         
-        let title = json["name"] as? String ?? "Imported Recipe"
+        let title = cleanHTMLEntities(json["name"] as? String ?? "Imported Recipe")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         let summary = json["description"] as? String ?? ""
         
         // Parse yield/servings
@@ -156,28 +157,24 @@ class URLRecipeScraperService: ObservableObject {
             parseIngredientString(str)
         }
         
-        // Parse instructions
+        // Parse instructions. Handles plain strings, arrays of strings,
+        // HowToStep objects, and HowToSection groups (whose steps live in
+        // itemListElement and were previously dropped entirely).
         let steps: [RecipeStep] = {
-            if let instructions = json["recipeInstructions"] as? [String] {
-                return instructions.enumerated().map { idx, text in
-                    RecipeStep(order: idx + 1, instruction: text.trimmingCharacters(in: .whitespacesAndNewlines))
-                }
+            guard let rawInstructions = json["recipeInstructions"] else { return [] }
+
+            let texts: [String]
+            if let plain = rawInstructions as? String {
+                texts = plain.components(separatedBy: "\n")
+            } else {
+                texts = collectInstructionTexts(rawInstructions)
             }
-            if let instructions = json["recipeInstructions"] as? [[String: Any]] {
-                return instructions.enumerated().compactMap { idx, obj in
-                    let text = obj["text"] as? String ?? obj["name"] as? String ?? ""
-                    guard !text.isEmpty else { return nil }
-                    return RecipeStep(order: idx + 1, instruction: text.trimmingCharacters(in: .whitespacesAndNewlines))
-                }
-            }
-            if let instructions = json["recipeInstructions"] as? String {
-                return instructions.components(separatedBy: "\n")
-                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                    .filter { !$0.isEmpty }
-                    .enumerated()
-                    .map { RecipeStep(order: $0.offset + 1, instruction: $0.element) }
-            }
-            return []
+
+            return texts
+                .map { cleanHTMLEntities($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .enumerated()
+                .map { RecipeStep(order: $0.offset + 1, instruction: $0.element) }
         }()
         
         // Parse category
@@ -217,10 +214,33 @@ class URLRecipeScraperService: ObservableObject {
         )
     }
     
+    /// Recursively flattens schema.org recipeInstructions values into plain
+    /// step texts. Supports HowToStep objects and nested HowToSection groups.
+    private func collectInstructionTexts(_ value: Any) -> [String] {
+        if let text = value as? String {
+            return [text]
+        }
+        if let array = value as? [Any] {
+            return array.flatMap { collectInstructionTexts($0) }
+        }
+        if let object = value as? [String: Any] {
+            if let nested = object["itemListElement"] {
+                return collectInstructionTexts(nested)
+            }
+            if let text = object["text"] as? String, !text.isEmpty {
+                return [text]
+            }
+            if let name = object["name"] as? String, !name.isEmpty {
+                return [name]
+            }
+        }
+        return []
+    }
+
     // MARK: - AI Extraction (Claude API)
     
     private var modelID: String {
-        UserDefaults.standard.string(forKey: "ai_model_id") ?? "claude-sonnet-4-20250514"
+        AIModelSettings.currentModelID
     }
 
     private func aiExtract(text: String, sourceURL: String) async throws -> Recipe {
@@ -325,8 +345,10 @@ class URLRecipeScraperService: ObservableObject {
     private func parseIngredientString(_ str: String) -> Ingredient {
         let cleaned = cleanHTMLEntities(str.trimmingCharacters(in: .whitespacesAndNewlines))
         
-        // Pattern: optional amount, optional unit, then name
-        let pattern = #"^([\d\s¼½¾⅓⅔⅛⅜⅝⅞/.-]+)?\s*(cups?|tbsp|tsp|tablespoons?|teaspoons?|oz|ounces?|lbs?|pounds?|g|grams?|kg|ml|liters?|l|pinch|cloves?|cans?|packages?|bunche?s?|sticks?|pieces?|slices?|heads?)?\s*[.,]?\s*(.+)"#
+        // Pattern: optional amount, optional unit, then name.
+        // The \b after the unit prevents short units from eating the start of
+        // ingredient names ("2 garlic" must not parse as unit "g" + "arlic").
+        let pattern = #"^([\d\s¼½¾⅓⅔⅛⅜⅝⅞/.-]+)?\s*(?:(cups?|tbsp|tsp|tablespoons?|teaspoons?|oz|ounces?|lbs?|pounds?|g|grams?|kg|ml|liters?|l|pinch|cloves?|cans?|packages?|bunche?s?|sticks?|pieces?|slices?|heads?)\b)?\s*[.,]?\s*(.+)"#
         
         if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) {
             let range = NSRange(cleaned.startIndex..., in: cleaned)
@@ -412,14 +434,30 @@ class URLRecipeScraperService: ObservableObject {
     }
     
     private func cleanHTMLEntities(_ str: String) -> String {
-        str.replacingOccurrences(of: "&amp;", with: "&")
+        var result = str
+            .replacingOccurrences(of: "&nbsp;", with: " ")
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&apos;", with: "'")
             .replacingOccurrences(of: "&lt;", with: "<")
             .replacingOccurrences(of: "&gt;", with: ">")
-            .replacingOccurrences(of: "&quot;", with: "\"")
-            .replacingOccurrences(of: "&#39;", with: "'")
-            .replacingOccurrences(of: "&nbsp;", with: " ")
-            .replacingOccurrences(of: "&#x27;", with: "'")
-            .replacingOccurrences(of: "&#x2F;", with: "/")
+
+        // Decode numeric entities (decimal and hex), e.g. &#8217; → ’
+        if result.contains("&#"),
+           let regex = try? NSRegularExpression(pattern: #"&#(x?)([0-9a-fA-F]+);"#, options: .caseInsensitive) {
+            let matches = regex.matches(in: result, range: NSRange(result.startIndex..., in: result))
+            for match in matches.reversed() {
+                guard let fullRange = Range(match.range, in: result),
+                      let hexFlagRange = Range(match.range(at: 1), in: result),
+                      let digitsRange = Range(match.range(at: 2), in: result) else { continue }
+                let isHex = !result[hexFlagRange].isEmpty
+                guard let code = UInt32(result[digitsRange], radix: isHex ? 16 : 10),
+                      let scalar = Unicode.Scalar(code) else { continue }
+                result.replaceSubrange(fullRange, with: String(Character(scalar)))
+            }
+        }
+
+        // &amp; must be decoded last so "&amp;lt;" doesn't double-decode to "<"
+        return result.replacingOccurrences(of: "&amp;", with: "&")
     }
     
     private func guessCategory(_ str: String) -> RecipeCategory {
@@ -464,7 +502,8 @@ class URLRecipeScraperService: ObservableObject {
     }
     
     private func isBlockedHost(_ host: String) -> Bool {
-        if host == "localhost" || host == "::1" { return true }
+        if host == "localhost" || host == "::1" || host == "::" || host == "0.0.0.0" { return true }
+        if host.hasSuffix(".local") || host.hasSuffix(".internal") { return true }
         if host.hasPrefix("127.") || host.hasPrefix("10.") || host.hasPrefix("192.168.") { return true }
         if host.hasPrefix("169.254.") { return true } // Link-local
         

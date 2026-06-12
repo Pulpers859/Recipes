@@ -9,7 +9,7 @@ struct SettingsView: View {
     
     @AppStorage("default_servings") private var defaultServings = 4
     @AppStorage("parse_mode") private var parseMode = "auto"
-    @AppStorage("ai_model_id") private var aiModelID = "claude-sonnet-4-20250514"
+    @AppStorage("ai_model_id") private var aiModelID = AIModelSettings.defaultModelID
     @AppStorage("keep_screen_awake") private var keepScreenAwake = true
     @AppStorage("analytics_enabled") private var analyticsEnabled = true
     
@@ -86,7 +86,7 @@ struct SettingsView: View {
 
                     Picker("AI Model", selection: $aiModelID) {
                         Text("Haiku (Fast & Cheap)").tag("claude-haiku-4-5-20251001")
-                        Text("Sonnet (Balanced)").tag("claude-sonnet-4-20250514")
+                        Text("Sonnet (Balanced)").tag("claude-sonnet-4-6")
                     }
                 } header: {
                     Text("AI Recipe Parsing")
@@ -259,6 +259,7 @@ struct SettingsView: View {
                 }
             }
             .onAppear {
+                AIModelSettings.migrateStoredModelIfNeeded()
                 loadAPIKeyIfNeeded()
                 AnalyticsService.shared.setAnalyticsEnabled(analyticsEnabled)
             }
@@ -489,6 +490,7 @@ struct SettingsView: View {
         for recipe in recipes {
             modelContext.delete(recipe)
         }
+        SpotlightIndexingService.shared.removeAllRecipes()
         AnalyticsService.shared.track("recipes_all_deleted", metadata: ["count": "\(count)"])
     }
 

@@ -144,6 +144,11 @@ struct RecipeListView: View {
             }
             .onAppear {
                 routePendingSpotlightRecipe()
+                // Keep the system Spotlight index in sync with the library so
+                // recipes are actually findable from iOS search.
+                if !recipes.isEmpty {
+                    SpotlightIndexingService.shared.indexAllRecipes(recipes)
+                }
             }
             .onChange(of: navigationState.spotlightRecipeID) { _, newID in
                 pendingSpotlightRecipeID = newID
@@ -648,6 +653,7 @@ struct RecipeListView: View {
         let count = toDelete.count
 
         for recipe in toDelete {
+            SpotlightIndexingService.shared.removeRecipe(recipe)
             modelContext.delete(recipe)
         }
 

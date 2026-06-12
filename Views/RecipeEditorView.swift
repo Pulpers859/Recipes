@@ -149,12 +149,9 @@ struct RecipeEditorView: View {
             Section("Ingredients") {
                 ForEach($ingredients) { $ingredient in
                     HStack {
-                        TextField("Amount", text: Binding(
-                            get: { ingredient.amount > 0 ? String(ingredient.amount) : "" },
-                            set: { ingredient.amount = Double($0) ?? 0 }
-                        ))
-                        .frame(width: 50)
-                        .keyboardType(.decimalPad)
+                        TextField("Amt", value: $ingredient.amount, format: .number)
+                            .frame(width: 50)
+                            .keyboardType(.decimalPad)
                         
                         TextField("Unit", text: $ingredient.unit)
                             .frame(width: 50)
@@ -247,7 +244,7 @@ struct RecipeEditorView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
-                Button("Cancel") { dismiss() }
+                Button("Cancel") { cancelEditing() }
             }
             ToolbarItem(placement: .confirmationAction) {
                 Button("Save") { saveRecipe() }
@@ -267,7 +264,18 @@ struct RecipeEditorView: View {
     }
     
     // MARK: - Actions
-    
+
+    /// Imports are inserted into the database before review so parsing results
+    /// persist — cancelling the review must remove that recipe again, otherwise
+    /// "Cancel" silently keeps an unreviewed import in the library.
+    private func cancelEditing() {
+        if isNewImport, recipe.modelContext != nil {
+            SpotlightIndexingService.shared.removeRecipe(recipe)
+            modelContext.delete(recipe)
+        }
+        dismiss()
+    }
+
     private func saveRecipe() {
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanedTags = tagText
@@ -330,12 +338,14 @@ struct RecipeEditorView: View {
             modelContext.insert(recipe)
         }
         
+        SpotlightIndexingService.shared.indexRecipe(recipe)
+
         AnalyticsService.shared.track("recipe_saved", metadata: [
             "mode": isNewRecipe ? (isNewImport ? "import_new" : "manual_new") : "edit_existing",
             "ingredient_count": "\(recipe.ingredients.count)",
             "step_count": "\(recipe.steps.count)"
         ])
-        
+
         dismiss()
     }
     

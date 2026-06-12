@@ -9,6 +9,7 @@ struct CookingModeView: View {
     
     @State private var currentStepIndex = 0
     @State private var activeTimers: [UUID: TimerState] = [:]
+    @State private var countdownTimers: [UUID: Timer] = [:]
     @State private var showIngredients = false
     
     private var sortedSteps: [RecipeStep] {
@@ -144,6 +145,12 @@ struct CookingModeView: View {
         }
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
+            // Stop countdowns when leaving cooking mode so dismissed timers
+            // don't keep ticking (and firing haptics) in the background.
+            for timer in countdownTimers.values {
+                timer.invalidate()
+            }
+            countdownTimers.removeAll()
         }
         .onChange(of: keepScreenAwake) { _, shouldKeepAwake in
             UIApplication.shared.isIdleTimerDisabled = shouldKeepAwake
@@ -183,6 +190,8 @@ struct CookingModeView: View {
                     }
                     
                     Button {
+                        countdownTimers[step.id]?.invalidate()
+                        countdownTimers.removeValue(forKey: step.id)
                         activeTimers.removeValue(forKey: step.id)
                     } label: {
                         Image(systemName: "xmark.circle.fill")
@@ -215,18 +224,21 @@ struct CookingModeView: View {
     }
     
     private func startCountdown(for id: UUID) {
-        Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { timer in
+        countdownTimers[id]?.invalidate()
+        let timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { timer in
             guard var state = activeTimers[id] else {
                 timer.invalidate()
+                countdownTimers.removeValue(forKey: id)
                 return
             }
-            
+
             if state.isRunning {
                 state.remaining -= 1
                 activeTimers[id] = state
-                
+
                 if state.remaining <= 0 {
                     timer.invalidate()
+                    countdownTimers.removeValue(forKey: id)
                     activeTimers.removeValue(forKey: id)
                     HapticFeedback.timerComplete()
                 } else if state.remaining == 10 {
@@ -234,6 +246,7 @@ struct CookingModeView: View {
                 }
             }
         }
+        countdownTimers[id] = timer
     }
     
     // MARK: - Ingredient Sheet

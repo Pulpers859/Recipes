@@ -18,6 +18,7 @@ struct PantryView: View {
     @State private var pantryStatusMessage: String?
     @State private var showShareSheet = false
     @State private var shareURL: URL?
+    @State private var showClearAllConfirm = false
 
     private var currentPlan: MealPlan? { mealPlans.first }
     private var checkedShoppingItems: [ShoppingItem] { shoppingItems.filter { $0.isChecked } }
@@ -92,13 +93,7 @@ struct PantryView: View {
 
                     if !pantryItems.isEmpty {
                         Button("Clear All", role: .destructive) {
-                            for item in pantryItems {
-                                modelContext.delete(item)
-                            }
-                            if persistPantryChanges(snapshot: []) {
-                                pantryStatusMessage = "Cleared pantry items."
-                                AnalyticsService.shared.track("pantry_cleared")
-                            }
+                            showClearAllConfirm = true
                         }
                     }
                 }
@@ -107,6 +102,12 @@ struct PantryView: View {
                 if let url = shareURL {
                     ShareSheet(activityItems: [url])
                 }
+            }
+            .alert("Clear all pantry items?", isPresented: $showClearAllConfirm) {
+                Button("Clear All", role: .destructive) { clearAllPantryItems() }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("This will remove all \(pantryItems.count) pantry item(s). Your latest automatic backup will still be on this device.")
             }
             .onAppear {
                 refreshAutomaticBackup()
@@ -458,6 +459,16 @@ struct PantryView: View {
             amount = ""
             unit = ""
             markAsStaple = false
+        }
+    }
+
+    private func clearAllPantryItems() {
+        for item in pantryItems {
+            modelContext.delete(item)
+        }
+        if persistPantryChanges(snapshot: []) {
+            pantryStatusMessage = "Cleared pantry items."
+            AnalyticsService.shared.track("pantry_cleared")
         }
     }
 

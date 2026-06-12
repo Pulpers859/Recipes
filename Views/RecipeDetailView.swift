@@ -90,6 +90,7 @@ struct RecipeDetailView: View {
         }
         .alert("Delete Recipe?", isPresented: $showDeleteConfirmation) {
             Button("Delete", role: .destructive) {
+                SpotlightIndexingService.shared.removeRecipe(recipe)
                 modelContext.delete(recipe)
             }
             Button("Cancel", role: .cancel) { }

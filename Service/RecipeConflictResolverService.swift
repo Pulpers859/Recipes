@@ -14,20 +14,53 @@ enum RecipeConflictResolverService {
         
         for (_, group) in grouped where group.count > 1 {
             guard let canonical = group.max(by: { qualityScore($0) < qualityScore($1) }) else { continue }
-            let duplicates = group.filter { $0.id != canonical.id }
-            
+            // A matching title alone is not proof of duplication — two distinct
+            // recipes can share a name. Only delete when the ingredients agree
+            // (or the recipes share an explicit source URL via the fingerprint).
+            let duplicates = group.filter {
+                $0.id != canonical.id && isConfidentDuplicate($0, of: canonical)
+            }
+            guard !duplicates.isEmpty else { continue }
+
             for duplicate in duplicates {
                 merge(source: duplicate, into: canonical)
+                SpotlightIndexingService.shared.removeRecipe(duplicate)
                 modelContext.delete(duplicate)
                 deletedDuplicates += 1
             }
-            
+
             mergedRecipes += 1
         }
         
         return ConflictResolutionResult(mergedRecipes: mergedRecipes, deletedDuplicates: deletedDuplicates)
     }
     
+    /// Recipes in the same fingerprint group share title + source URL. When a
+    /// non-empty source URL matches, that's strong evidence of duplication.
+    /// For title-only matches, require the ingredient lists to substantially
+    /// overlap before destructively merging.
+    private static func isConfidentDuplicate(_ candidate: Recipe, of canonical: Recipe) -> Bool {
+        let source = (canonical.sourceURL ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !source.isEmpty { return true }
+
+        let candidateKeys = ingredientKeySet(candidate)
+        let canonicalKeys = ingredientKeySet(canonical)
+
+        // A recipe with no ingredients is an empty shell — safe to fold in.
+        if candidateKeys.isEmpty || canonicalKeys.isEmpty { return true }
+
+        let overlap = candidateKeys.intersection(canonicalKeys).count
+        let union = candidateKeys.union(canonicalKeys).count
+        guard union > 0 else { return true }
+        return Double(overlap) / Double(union) >= 0.5
+    }
+
+    private static func ingredientKeySet(_ recipe: Recipe) -> Set<String> {
+        Set(recipe.normalizedIngredients.map {
+            ShoppingListService.normalizedIngredientKey($0.name)
+        })
+    }
+
     private static func fingerprint(_ recipe: Recipe) -> String {
         let title = recipe.title
             .trimmingCharacters(in: .whitespacesAndNewlines)

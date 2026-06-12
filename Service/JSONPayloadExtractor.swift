@@ -17,15 +17,28 @@ enum JSONPayloadExtractor {
             }
         }
 
-        if let objectPayload = firstBalancedPayload(in: trimmed, opening: "{", closing: "}") {
-            if let objectData = objectPayload.data(using: .utf8), isValidJSON(objectData) {
-                return objectData
-            }
+        // Try whichever container opens first in the text. An array response
+        // with leading prose must not be truncated to its first inner object.
+        let objectStart = trimmed.firstIndex(of: "{")
+        let arrayStart = trimmed.firstIndex(of: "[")
+        let arrayFirst: Bool
+        switch (objectStart, arrayStart) {
+        case let (.some(objectIndex), .some(arrayIndex)):
+            arrayFirst = arrayIndex < objectIndex
+        case (.none, .some):
+            arrayFirst = true
+        default:
+            arrayFirst = false
         }
 
-        if let arrayPayload = firstBalancedPayload(in: trimmed, opening: "[", closing: "]") {
-            if let arrayData = arrayPayload.data(using: .utf8), isValidJSON(arrayData) {
-                return arrayData
+        let candidates: [(opening: Character, closing: Character)] = arrayFirst
+            ? [("[", "]"), ("{", "}")]
+            : [("{", "}"), ("[", "]")]
+
+        for candidate in candidates {
+            if let payload = firstBalancedPayload(in: trimmed, opening: candidate.opening, closing: candidate.closing),
+               let payloadData = payload.data(using: .utf8), isValidJSON(payloadData) {
+                return payloadData
             }
         }
 

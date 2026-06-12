@@ -9,6 +9,7 @@ final class AnalyticsService {
     
     private let logger = Logger(subsystem: "com.recipevault.app", category: "analytics")
     private let defaults = UserDefaults.standard
+    private static let timestampFormatter = ISO8601DateFormatter()
     
     private let analyticsEnabledKey = "analytics_enabled"
     private let cleanExitKey = "app_clean_exit"
@@ -49,7 +50,7 @@ final class AnalyticsService {
     func track(_ event: String, metadata: [String: String] = [:]) {
         guard isAnalyticsEnabled() else { return }
         
-        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let timestamp = Self.timestampFormatter.string(from: Date())
         let metadataText = metadata
             .sorted { $0.key < $1.key }
             .map { "\($0.key)=\($0.value)" }
@@ -58,7 +59,9 @@ final class AnalyticsService {
         
         logger.log("\(line, privacy: .public)")
         
-        var events = recentEvents()
+        // Read the FULL stored history — recentEvents() returns only the last
+        // 20, which silently capped the log at 21 entries instead of 200.
+        var events = defaults.stringArray(forKey: recentEventsKey) ?? []
         events.append(line)
         if events.count > 200 {
             events.removeFirst(events.count - 200)
