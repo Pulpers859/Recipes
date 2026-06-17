@@ -175,13 +175,19 @@ struct MealPlanView: View {
     private func migrateLegacyPlanIfNeeded() {
         let migrationKey = "meal_plan_week_migration_done"
         guard !UserDefaults.standard.bool(forKey: migrationKey) else { return }
-        UserDefaults.standard.set(true, forKey: migrationKey)
 
         if MealPlanningService.plan(forWeekContaining: Date(), in: mealPlans) == nil,
            let legacyPlan = mealPlans.first,
            !legacyPlan.entries.isEmpty {
             legacyPlan.weekStartDate = MealPlanningService.weekStart()
+            // Persist the rebase BEFORE marking the migration done. Setting the
+            // flag first means a kill in between leaves the migration "done" but
+            // unapplied, stranding the legacy plan in a past week where the
+            // week-scoped lookup can never surface it again.
+            guard (try? modelContext.save()) != nil else { return }
         }
+
+        UserDefaults.standard.set(true, forKey: migrationKey)
     }
 
     private var heroHeader: some View {
@@ -386,6 +392,7 @@ struct MealPlanView: View {
             servings: recipe.servings
         )
         plan.entries.append(entry)
+        try? modelContext.save()
         AnalyticsService.shared.track("meal_plan_entry_added", metadata: [
             "slot": slot.rawValue,
             "day": "\(selectedDay)"
@@ -395,6 +402,7 @@ struct MealPlanView: View {
     private func removeEntry(_ entry: MealPlanEntry) {
         guard let plan = currentPlan else { return }
         plan.entries.removeAll { $0.id == entry.id }
+        try? modelContext.save()
     }
 
     private func generateShoppingList() {

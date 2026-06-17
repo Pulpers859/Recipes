@@ -13,11 +13,12 @@ final class RecipeThumbnailCache {
         cache.countLimit = 400
     }
 
-    /// `data.count` in the key is a cheap change-detector: replacing a photo
-    /// virtually always changes the byte count, and a stale thumbnail for one
-    /// render pass is an acceptable worst case.
+    /// Keys on a cheap content fingerprint (byte count + a hash of the head and
+    /// tail bytes) rather than byte count alone, so replacing a photo with a
+    /// different image of identical size doesn't return the stale thumbnail.
+    /// The sample hash is O(1)-ish — far cheaper than decoding the full JPEG.
     func thumbnail(for data: Data, recipeID: UUID, maxPixelSize: CGFloat = 700) -> UIImage? {
-        let key = "\(recipeID.uuidString)-\(data.count)" as NSString
+        let key = cacheKey(for: data, recipeID: recipeID)
         if let cached = cache.object(forKey: key) {
             return cached
         }
@@ -36,5 +37,19 @@ final class RecipeThumbnailCache {
         let image = UIImage(cgImage: cgImage)
         cache.setObject(image, forKey: key)
         return image
+    }
+
+    private func cacheKey(for data: Data, recipeID: UUID) -> NSString {
+        var hasher = Hasher()
+        hasher.combine(data.count)
+        // Hashing a small head+tail sample distinguishes same-size-but-different
+        // images without paying to hash the whole payload on every render. The
+        // cache is in-memory only, so Hasher's per-process seed is fine.
+        let sampleSize = 1024
+        hasher.combine(data.prefix(sampleSize))
+        if data.count > sampleSize {
+            hasher.combine(data.suffix(sampleSize))
+        }
+        return "\(recipeID.uuidString)-\(hasher.finalize())" as NSString
     }
 }

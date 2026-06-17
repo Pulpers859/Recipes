@@ -22,6 +22,7 @@ struct RecipeListView: View {
     @State private var showDeleteSelectedConfirm = false
     @State private var navigationPath: [RecipeRoute] = []
     @State private var pendingSpotlightRecipeID: UUID?
+    @State private var spotlightRouteAttempts = 0
 
     @StateObject private var parser = RecipeParserService()
 
@@ -691,7 +692,20 @@ struct RecipeListView: View {
         guard let requestedID = pendingSpotlightRecipeID ?? navigationState.spotlightRecipeID else { return }
 
         guard recipes.contains(where: { $0.id == requestedID }) else {
-            pendingSpotlightRecipeID = requestedID
+            // Not found. On a cold launch the library query may not have
+            // populated yet, so retain the request and retry on the next list
+            // change. But once the library has loaded without it (or we've run
+            // out of retries) the recipe is gone — clear the request so a
+            // deleted-recipe tap can't linger and hijack a later navigation.
+            if recipes.isEmpty && spotlightRouteAttempts < 5 {
+                pendingSpotlightRecipeID = requestedID
+                spotlightRouteAttempts += 1
+            } else {
+                pendingSpotlightRecipeID = nil
+                navigationState.clearSpotlightRequest()
+                spotlightRouteAttempts = 0
+                AnalyticsService.shared.track("spotlight_open_missing")
+            }
             return
         }
 
@@ -701,6 +715,7 @@ struct RecipeListView: View {
 
         pendingSpotlightRecipeID = nil
         navigationState.clearSpotlightRequest()
+        spotlightRouteAttempts = 0
         AnalyticsService.shared.track("spotlight_open_success")
     }
 }
