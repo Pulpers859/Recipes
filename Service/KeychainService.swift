@@ -161,19 +161,28 @@ enum APIKeyStore {
             if let legacy = KeychainService.readString(forKey: apiKeyAccount, service: service)?
                 .trimmingCharacters(in: .whitespacesAndNewlines),
                !legacy.isEmpty {
-                try? saveClaudeKey(legacy)
-                return true
+                return migrate(legacy)
             }
         }
 
         if let defaultsValue = UserDefaults.standard.string(forKey: apiKeyAccount)?
             .trimmingCharacters(in: .whitespacesAndNewlines),
            !defaultsValue.isEmpty {
-            try? saveClaudeKey(defaultsValue)
-            return true
+            return migrate(defaultsValue)
         }
 
         return false
+    }
+
+    /// Moves a recovered legacy key into the primary keychain entry. Only
+    /// reports success when the secure write actually persisted — otherwise the
+    /// legacy copy is left untouched so a later attempt (e.g. once the device
+    /// is unlocked) can retry, instead of falsely claiming the key was secured.
+    private static func migrate(_ key: String) -> Bool {
+        guard (try? saveClaudeKey(key)) != nil, storedClaudeKey() != nil else {
+            return false
+        }
+        return true
     }
 
     private static var primaryServiceName: String {

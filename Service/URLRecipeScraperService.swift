@@ -303,11 +303,11 @@ class URLRecipeScraperService: ObservableObject {
 
     private func aiExtract(text: String, sourceURL: String) async throws -> Recipe {
         guard !apiKey.isEmpty else {
-            throw ScraperError.apiError
+            throw ScraperError.apiError("no API key is configured")
         }
 
         guard let endpoint = URL(string: "https://api.anthropic.com/v1/messages") else {
-            throw ScraperError.apiError
+            throw ScraperError.apiError(nil)
         }
 
         let truncated = String(text.prefix(10000))
@@ -339,16 +339,28 @@ class URLRecipeScraperService: ObservableObject {
         request.httpBody = jsonData
         
         let (data, response) = try await urlSession.data(for: request)
-        
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            throw ScraperError.apiError
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw ScraperError.apiError(nil)
         }
-        
+        guard httpResponse.statusCode == 200 else {
+            // Surface the status and server message so a bad key (401), rate
+            // limit (429), or overload (529) are distinguishable instead of all
+            // reading as a generic "AI extraction failed".
+            let serverMessage = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .prefix(240) ?? ""
+            let detail = serverMessage.isEmpty
+                ? "status \(httpResponse.statusCode)"
+                : "status \(httpResponse.statusCode): \(serverMessage)"
+            throw ScraperError.apiError(detail)
+        }
+
         let apiResponse = try JSONDecoder().decode(AnthropicTextResponse.self, from: data)
         guard let textContent = apiResponse.content.first(where: { $0.type == "text" }),
               let responseText = textContent.text,
               let recipeData = JSONPayloadExtractor.extract(from: responseText) else {
-            throw ScraperError.apiError
+            throw ScraperError.apiError("the AI response did not contain readable recipe data")
         }
 
         let parsed = try JSONDecoder().decode(AIParsedRecipe.self, from: recipeData)
@@ -619,8 +631,9 @@ final class SSRFRedirectGuard: NSObject, URLSessionTaskDelegate {
 // MARK: - Errors
 
 enum ScraperError: LocalizedError {
-    case invalidURL, blockedHost, fetchFailed, decodeFailed, noStructuredData, parseError, notRecipeType, apiError
-    
+    case invalidURL, blockedHost, fetchFailed, decodeFailed, noStructuredData, parseError, notRecipeType
+    case apiError(String?)
+
     var errorDescription: String? {
         switch self {
         case .invalidURL: return "Invalid URL format"
@@ -630,7 +643,9 @@ enum ScraperError: LocalizedError {
         case .noStructuredData: return "No structured recipe data found"
         case .parseError: return "Could not parse recipe data"
         case .notRecipeType: return "Structured data is not a Recipe type"
-        case .apiError: return "AI extraction failed"
+        case .apiError(let detail):
+            if let detail, !detail.isEmpty { return "AI extraction failed (\(detail))" }
+            return "AI extraction failed"
         }
     }
 }
