@@ -141,7 +141,8 @@ class ShoppingListService {
         let trimmed = rawValue.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         switch trimmed {
         case "cup", "cups", "tbsp", "tablespoon", "tablespoons", "tsp", "teaspoon", "teaspoons",
-             "oz", "ounce", "ounces", "lb", "lbs", "pound", "pounds", "g", "gram", "grams",
+             "oz", "ounce", "ounces", "fl oz", "floz", "fluid ounce", "fluid ounces",
+             "lb", "lbs", "pound", "pounds", "g", "gram", "grams",
              "kg", "kilogram", "kilograms", "ml", "milliliter", "milliliters", "l", "liter", "liters",
              "pinch", "pinches", "scoop", "scoops", "slice", "slices", "tube", "tubes", "roll", "rolls",
              "tortilla", "tortillas", "clove", "cloves", "can", "cans", "package", "packages",
@@ -262,6 +263,7 @@ class ShoppingListService {
         case "cups", "cup": return "cup"
         case "tbsp", "tablespoon", "tablespoons": return "tbsp"
         case "tsp", "teaspoon", "teaspoons": return "tsp"
+        case "fl oz", "floz", "fl. oz", "fl. oz.", "fluid ounce", "fluid ounces": return "fl oz"
         case "oz", "ounce", "ounces": return "oz"
         case "lb", "lbs", "pound", "pounds": return "lb"
         case "g", "gram", "grams": return "g"
@@ -302,15 +304,19 @@ class ShoppingListService {
             return to.isEmpty ? (amount, from) : (amount, to)
         }
         
-        // Weight conversions (to grams as common base)
+        // Weight conversions (to grams as common base). Bare "oz" is treated
+        // as a weight ounce (the US convention for solids); fluid ounces are a
+        // separate "fl oz" volume token below. A unit must never appear in both
+        // tables, otherwise the same "oz" silently converts as weight in one
+        // combine and volume in another and corrupts the quantity.
         let weightToGrams: [String: Double] = ["g": 1, "kg": 1000, "oz": 28.35, "lb": 453.6]
         if let fromFactor = weightToGrams[from], let toFactor = weightToGrams[to] {
             let grams = amount * fromFactor
             return (grams / toFactor, to)
         }
-        
+
         // Volume conversions (to tsp as common base)
-        let volumeToTsp: [String: Double] = ["tsp": 1, "tbsp": 3, "cup": 48, "ml": 0.2029, "l": 202.9, "oz": 6]
+        let volumeToTsp: [String: Double] = ["tsp": 1, "tbsp": 3, "cup": 48, "ml": 0.2029, "l": 202.9, "fl oz": 6]
         if let fromFactor = volumeToTsp[from], let toFactor = volumeToTsp[to] {
             let tsps = amount * fromFactor
             return (tsps / toFactor, to)

@@ -88,7 +88,10 @@ struct ContentView: View {
         .alert("Recipe Storage Problem", isPresented: $showDatabaseError) {
             Button("OK", role: .cancel) { }
         } message: {
-            Text("Your recipe database could not be opened, so the app is running on temporary storage. Changes made in this session will NOT be saved. Restart the app — if this keeps happening, export a backup of anything important and reinstall.\n\nDetails: \(databaseErrorMessage)")
+            // The data stack writes a message specific to how it recovered
+            // (reset-but-persistent vs. temporary in-memory), so show it
+            // verbatim rather than assuming the worst case.
+            Text(databaseErrorMessage)
         }
     }
 }

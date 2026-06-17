@@ -184,11 +184,20 @@ class URLRecipeScraperService: ObservableObject {
         let steps: [RecipeStep] = {
             guard let rawInstructions = json["recipeInstructions"] else { return [] }
 
-            let texts: [String]
+            var texts: [String]
             if let plain = rawInstructions as? String {
                 texts = plain.components(separatedBy: "\n")
             } else {
                 texts = collectInstructionTexts(rawInstructions)
+            }
+
+            // Some sites cram the whole method into one string with no line
+            // breaks. Left alone that becomes a single giant "step"; split a
+            // long single blob into sentences so each instruction stands alone.
+            let nonEmpty = texts.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            if nonEmpty.count == 1, let only = nonEmpty.first, only.count > 200 {
+                texts = splitInstructionSentences(only)
             }
 
             return texts
@@ -256,6 +265,34 @@ class URLRecipeScraperService: ObservableObject {
             }
         }
         return []
+    }
+
+    /// Splits a run-together instruction blob into sentences. Breaks only on a
+    /// period/!/? followed by whitespace and a capital letter or digit, so it
+    /// separates real steps ("...golden. Remove from heat.") without cutting
+    /// decimals ("1.5 cups") or abbreviations mid-number. Falls back to the
+    /// whole blob as a single step if nothing splits cleanly.
+    private func splitInstructionSentences(_ text: String) -> [String] {
+        let pattern = #"(?<=[.!?])\s+(?=[A-Z0-9])"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [text] }
+
+        let ns = text as NSString
+        var pieces: [String] = []
+        var lastEnd = 0
+        regex.enumerateMatches(in: text, range: NSRange(location: 0, length: ns.length)) { match, _, _ in
+            guard let match = match else { return }
+            let piece = ns.substring(with: NSRange(location: lastEnd, length: match.range.location - lastEnd))
+            pieces.append(piece)
+            lastEnd = match.range.location + match.range.length
+        }
+        if lastEnd < ns.length {
+            pieces.append(ns.substring(from: lastEnd))
+        }
+
+        let cleaned = pieces
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { $0.count > 1 }
+        return cleaned.count > 1 ? cleaned : [text]
     }
 
     // MARK: - AI Extraction (Claude API)
