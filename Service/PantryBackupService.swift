@@ -3,6 +3,13 @@ import Foundation
 enum PantryBackupService {
     private static let backupDirectoryName = "RecipeVault/Backups"
     private static let automaticBackupFilename = "RecipeVault-Pantry-Latest.json"
+    // A separate snapshot taken right before a destructive clear. The rolling
+    // automatic backup gets overwritten with the (now empty) pantry the instant
+    // items are cleared, so it can't be the recovery story for a clear-all —
+    // this file is, and nothing else writes to it.
+    private static let preClearBackupFilename = "RecipeVault-Pantry-BeforeClear.json"
+
+    static let currentBackupVersion = 1
 
     static func exportAsJSON(pantryItems: [PantryItem]) throws -> Data {
         let exportItems = pantryItems.map { item in
@@ -49,6 +56,66 @@ enum PantryBackupService {
     }
 
     static func automaticBackupURL() throws -> URL {
+        try backupDirectoryURL().appendingPathComponent(automaticBackupFilename)
+    }
+
+    /// URL of the snapshot captured immediately before a destructive clear.
+    static func preClearBackupURL() throws -> URL {
+        try backupDirectoryURL().appendingPathComponent(preClearBackupFilename)
+    }
+
+    /// Writes the pre-clear recovery snapshot. Call this with the *current*
+    /// items just before deleting them.
+    @discardableResult
+    static func writePreClearBackup(pantryItems: [PantryItem]) throws -> URL {
+        let backupURL = try preClearBackupURL()
+        let data = try exportAsJSON(pantryItems: pantryItems)
+        try data.write(to: backupURL, options: .atomic)
+        return backupURL
+    }
+
+    /// True when a non-empty pre-clear snapshot exists to restore from.
+    static func hasRestorableBackup() -> Bool {
+        guard let url = try? preClearBackupURL(),
+              let data = try? Data(contentsOf: url),
+              let items = try? importFromJSON(data: data) else { return false }
+        return !items.isEmpty
+    }
+
+    /// Restores items from the pre-clear snapshot file.
+    static func restoreFromPreClearBackup() throws -> [PantryItem] {
+        let url = try preClearBackupURL()
+        let data = try Data(contentsOf: url)
+        return try importFromJSON(data: data)
+    }
+
+    /// Decodes a pantry backup into fresh `PantryItem`s. Version-aware and
+    /// tolerant of a single corrupt record so one bad row can't fail the whole
+    /// restore.
+    static func importFromJSON(data: Data) throws -> [PantryItem] {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let wrapper = try decoder.decode(PantryImportWrapper.self, from: data)
+        let version = wrapper.version ?? 1
+        guard version <= currentBackupVersion else {
+            throw PantryBackupError.unsupportedVersion(found: version, supported: currentBackupVersion)
+        }
+
+        return wrapper.pantryItems.compactMap { $0.value }.map { exp in
+            let item = PantryItem(
+                name: exp.name,
+                amount: max(exp.amount, 0),
+                unit: exp.unit,
+                category: ShoppingCategory(rawValue: exp.category) ?? .other,
+                isStaple: exp.isStaple
+            )
+            item.dateUpdated = exp.dateUpdated
+            return item
+        }
+    }
+
+    private static func backupDirectoryURL() throws -> URL {
         let documentsDirectory = try FileManager.default.url(
             for: .documentDirectory,
             in: .userDomainMask,
@@ -57,7 +124,32 @@ enum PantryBackupService {
         )
         let backupDirectory = documentsDirectory.appendingPathComponent(backupDirectoryName, isDirectory: true)
         try FileManager.default.createDirectory(at: backupDirectory, withIntermediateDirectories: true)
-        return backupDirectory.appendingPathComponent(automaticBackupFilename)
+        return backupDirectory
+    }
+}
+
+enum PantryBackupError: LocalizedError {
+    case unsupportedVersion(found: Int, supported: Int)
+
+    var errorDescription: String? {
+        switch self {
+        case let .unsupportedVersion(found, supported):
+            return "This pantry backup uses a newer format (v\(found)) than this app supports (v\(supported)). Update the app and try again."
+        }
+    }
+}
+
+/// Lenient decode counterpart of `PantryExportWrapper`.
+private struct PantryImportWrapper: Decodable {
+    let version: Int?
+    let pantryItems: [PantryFailableDecodable<ExportablePantryItem>]
+}
+
+private struct PantryFailableDecodable<T: Decodable>: Decodable {
+    let value: T?
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        value = try? container.decode(T.self)
     }
 }
 

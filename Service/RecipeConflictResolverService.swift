@@ -13,7 +13,16 @@ enum RecipeConflictResolverService {
         var deletedDuplicates = 0
         
         for (_, group) in grouped where group.count > 1 {
-            guard let canonical = group.max(by: { qualityScore($0) < qualityScore($1) }) else { continue }
+            // Deterministic winner: highest quality, then oldest (stable
+            // dateAdded), then id. Plain `max(by:)` over equal scores is
+            // arbitrary, which made *which* record survived — and therefore
+            // its dateAdded/id/spotlight entry — change run to run.
+            guard let canonical = group.max(by: { lhs, rhs in
+                let ls = qualityScore(lhs), rs = qualityScore(rhs)
+                if ls != rs { return ls < rs }
+                if lhs.dateAdded != rhs.dateAdded { return lhs.dateAdded > rhs.dateAdded }
+                return lhs.id.uuidString > rhs.id.uuidString
+            }) else { continue }
             // A matching title alone is not proof of duplication — two distinct
             // recipes can share a name. Only delete when the ingredients agree
             // (or the recipes share an explicit source URL via the fingerprint).
@@ -59,7 +68,11 @@ enum RecipeConflictResolverService {
         let overlap = candidateKeys.intersection(canonicalKeys).count
         let union = candidateKeys.union(canonicalKeys).count
         guard union > 0 else { return true }
-        return Double(overlap) / Double(union) >= 0.5
+        // Require a strong (not just majority) ingredient overlap before a
+        // destructive merge. The loser's distinct ingredients are discarded
+        // when the canonical already has its own, so a 50%-similar pair is too
+        // weak a signal to delete one — demand near-identical lists.
+        return Double(overlap) / Double(union) >= 0.8
     }
 
     private static func ingredientKeySet(_ recipe: Recipe) -> Set<String> {

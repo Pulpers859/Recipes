@@ -72,13 +72,35 @@ class RecipeExportService {
         return backupURL
     }
 
-    /// Import recipes from a JSON backup
+    /// Current backup schema version produced by `exportAsJSON`.
+    static let currentBackupVersion = 2
+
+    /// Import recipes from a JSON backup.
+    ///
+    /// Resilience guarantees:
+    /// - A backup whose `version` is newer than this build understands is
+    ///   rejected with a clear error rather than silently mis-imported.
+    /// - One malformed recipe record is skipped instead of throwing away the
+    ///   entire file (each record decodes independently).
     static func importFromJSON(data: Data) throws -> [Recipe] {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        let wrapper = try decoder.decode(ExportWrapper.self, from: data)
-        
-        return wrapper.recipes.map { exp in
+
+        let wrapper = try decoder.decode(ImportWrapper.self, from: data)
+
+        let version = wrapper.version ?? 1
+        guard version <= currentBackupVersion else {
+            throw ImportError.unsupportedVersion(found: version, supported: currentBackupVersion)
+        }
+
+        let decoded = wrapper.recipes.compactMap { $0.value }
+        guard !decoded.isEmpty else {
+            // Either an empty backup or every record failed to decode; both are
+            // worth surfacing rather than returning a silent empty import.
+            throw ImportError.noReadableRecipes
+        }
+
+        return decoded.map { exp in
             let recipe = Recipe(
                 title: exp.title,
                 summary: exp.summary,
@@ -335,6 +357,37 @@ private struct ExportWrapper: Codable {
     let exportDate: Date
     let recipeCount: Int
     let recipes: [ExportableRecipe]
+}
+
+/// Lenient counterpart used only for import. `version` is optional (older
+/// files may predate it) and each recipe is wrapped so a single corrupt
+/// record can't fail the whole decode.
+private struct ImportWrapper: Decodable {
+    let version: Int?
+    let recipes: [FailableDecodable<ExportableRecipe>]
+}
+
+/// Decodes to `nil` instead of throwing when the element is malformed.
+private struct FailableDecodable<T: Decodable>: Decodable {
+    let value: T?
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        value = try? container.decode(T.self)
+    }
+}
+
+enum ImportError: LocalizedError {
+    case unsupportedVersion(found: Int, supported: Int)
+    case noReadableRecipes
+
+    var errorDescription: String? {
+        switch self {
+        case let .unsupportedVersion(found, supported):
+            return "This backup was made by a newer version of Recipe Vault (format v\(found)). This app understands up to format v\(supported). Update the app, then import again."
+        case .noReadableRecipes:
+            return "No readable recipes were found in this backup file."
+        }
+    }
 }
 
 private struct ExportableRecipe: Codable {

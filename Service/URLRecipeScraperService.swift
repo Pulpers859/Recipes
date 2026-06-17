@@ -19,6 +19,11 @@ class URLRecipeScraperService: ObservableObject {
         config.timeoutIntervalForResource = 60
         return URLSession(configuration: config)
     }()
+
+    // Re-validates every redirect hop so a public page can't 302 us onto a
+    // private/loopback host (the classic SSRF blocklist bypass). Held as a
+    // stored property so the per-task delegate outlives the request.
+    private let redirectGuard = SSRFRedirectGuard()
     
     // MARK: - Public API
     
@@ -30,9 +35,10 @@ class URLRecipeScraperService: ObservableObject {
         lastError = nil
         defer { isLoading = false }
         
-        // Fetch page HTML
+        // Fetch page HTML. The redirect guard re-checks each hop's host so a
+        // safe-looking URL can't bounce us onto a private/metadata endpoint.
         statusMessage = "Fetching page..."
-        let (data, response) = try await urlSession.data(from: url)
+        let (data, response) = try await urlSession.data(from: url, delegate: redirectGuard)
         
         guard let httpResponse = response as? HTTPURLResponse,
               (200...299).contains(httpResponse.statusCode) else {
@@ -120,10 +126,16 @@ class URLRecipeScraperService: ObservableObject {
             throw ScraperError.parseError
         }
         
-        // Verify it's a Recipe type
+        // Verify it's a Recipe type. Match on a "Recipe" suffix so namespaced
+        // forms like "http://schema.org/Recipe" are recognised, not just the
+        // bare "Recipe" string.
         let isRecipeType: Bool = {
-            if let type = json["@type"] as? String, type == "Recipe" { return true }
-            if let types = json["@type"] as? [String], types.contains("Recipe") { return true }
+            func matches(_ value: String) -> Bool {
+                let v = value.trimmingCharacters(in: .whitespaces)
+                return v == "Recipe" || v.hasSuffix("/Recipe") || v.hasSuffix("Recipe")
+            }
+            if let type = json["@type"] as? String, matches(type) { return true }
+            if let types = json["@type"] as? [String], types.contains(where: matches) { return true }
             return false
         }()
         
@@ -135,16 +147,23 @@ class URLRecipeScraperService: ObservableObject {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let summary = json["description"] as? String ?? ""
         
-        // Parse yield/servings
+        // Parse yield/servings. schema.org allows a string ("4 servings"), an
+        // array, a bare number, or a QuantitativeValue object {"value": 4}.
         let servings: Int = {
             if let yield = json["recipeYield"] as? String {
                 return extractFirstInteger(from: yield) ?? 4
             }
-            if let yield = json["recipeYield"] as? [String], let first = yield.first {
-                return extractFirstInteger(from: first) ?? 4
+            if let yield = json["recipeYield"] as? [Any], let first = yield.first {
+                if let s = first as? String { return extractFirstInteger(from: s) ?? 4 }
+                if let n = first as? NSNumber { return max(1, n.intValue) }
             }
-            if let yield = json["recipeYield"] as? Int {
-                return yield
+            if let yield = json["recipeYield"] as? NSNumber {
+                return max(1, yield.intValue)
+            }
+            if let yield = json["recipeYield"] as? [String: Any],
+               let value = yield["value"] {
+                if let n = value as? NSNumber { return max(1, n.intValue) }
+                if let s = value as? String { return extractFirstInteger(from: s) ?? 4 }
             }
             return 4
         }()
@@ -322,25 +341,37 @@ class URLRecipeScraperService: ObservableObject {
         return Int(text[match])
     }
     
-    /// Parse ISO 8601 duration (PT30M, PT1H30M) to minutes
+    /// Parse ISO 8601 duration (PT30M, PT1H30M, P1DT2H, PT45S) to minutes.
+    /// Minutes are read from the *time* component (after `T`) so the month
+    /// designator in a fully-qualified duration like `P0Y0M0DT30M` can't be
+    /// mistaken for 30 minutes.
     private func parseDuration(_ iso: String?) -> Int {
         guard let iso = iso else { return 0 }
         let normalized = iso.uppercased()
-        
-        var hours = 0, minutes = 0
-        let hourPattern = #"(\d+)H"#
-        let minPattern = #"(\d+)M"#
-        
-        if let match = normalized.range(of: hourPattern, options: .regularExpression) {
-            let numStr = normalized[match].dropLast()
-            hours = Int(numStr) ?? 0
+
+        // Split date portion (days/months/years) from time portion (H/M/S).
+        let timePart: Substring
+        let datePart: Substring
+        if let tIndex = normalized.firstIndex(of: "T") {
+            datePart = normalized[normalized.startIndex..<tIndex]
+            timePart = normalized[normalized.index(after: tIndex)...]
+        } else {
+            datePart = Substring(normalized)
+            timePart = ""
         }
-        if let match = normalized.range(of: minPattern, options: .regularExpression) {
-            let numStr = normalized[match].dropLast()
-            minutes = Int(numStr) ?? 0
+
+        func number(before designator: Character, in text: Substring) -> Int {
+            let pattern = "(\\d+)\(designator)"
+            guard let match = text.range(of: pattern, options: .regularExpression) else { return 0 }
+            return Int(text[match].dropLast()) ?? 0
         }
-        
-        return hours * 60 + minutes
+
+        let days = number(before: "D", in: datePart)
+        let hours = number(before: "H", in: timePart)
+        let minutes = number(before: "M", in: timePart)
+        let seconds = number(before: "S", in: timePart)
+
+        return days * 24 * 60 + hours * 60 + minutes + (seconds >= 30 ? 1 : 0)
     }
     
     /// Parse an ingredient string like "2 cups all-purpose flour" into
@@ -434,38 +465,118 @@ class URLRecipeScraperService: ObservableObject {
         guard let url = URL(string: trimmed) else {
             throw ScraperError.invalidURL
         }
-        
-        guard let scheme = url.scheme?.lowercased(), scheme == "https" || scheme == "http" else {
+
+        switch URLSafetyValidator.validate(url) {
+        case .allowed:
+            return url
+        case .invalid:
             throw ScraperError.invalidURL
-        }
-        
-        guard let host = url.host?.lowercased(), !host.isEmpty else {
-            throw ScraperError.invalidURL
-        }
-        
-        if isBlockedHost(host) {
+        case .blocked:
             throw ScraperError.blockedHost
         }
-        
-        return url
     }
-    
-    private func isBlockedHost(_ host: String) -> Bool {
-        if host == "localhost" || host == "::1" || host == "::" || host == "0.0.0.0" { return true }
+
+}
+
+// MARK: - URL Safety
+
+/// Centralised SSRF protection shared by the initial request and the redirect
+/// guard. String-prefix checks alone are easy to bypass (decimal/hex IPs,
+/// IPv6 ULA), so we normalise the host before matching. DNS rebinding — a
+/// public name that resolves to a private IP — is not defeated here; that
+/// requires validating the *resolved* address at connect time.
+enum URLSafetyValidator {
+    enum Result { case allowed, invalid, blocked }
+
+    static func validate(_ url: URL) -> Result {
+        guard let scheme = url.scheme?.lowercased(), scheme == "https" || scheme == "http" else {
+            return .invalid
+        }
+        guard let host = url.host?.lowercased(), !host.isEmpty else {
+            return .invalid
+        }
+        return isBlockedHost(host) ? .blocked : .allowed
+    }
+
+    static func isAllowed(_ url: URL) -> Bool {
+        validate(url) == .allowed
+    }
+
+    static func isBlockedHost(_ rawHost: String) -> Bool {
+        // URL.host strips brackets from IPv6 literals; normalise just in case.
+        let host = rawHost
+            .trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+            .lowercased()
+
+        if host.isEmpty { return true }
+        if host == "localhost" || host.hasSuffix(".localhost") { return true }
         if host.hasSuffix(".local") || host.hasSuffix(".internal") { return true }
+
+        // IPv6 loopback / unspecified / link-local / unique-local (fc00::/7).
+        if host.contains(":") {
+            if host == "::1" || host == "::" { return true }
+            if host.hasPrefix("fe80:") { return true }          // link-local
+            if host.hasPrefix("fc") || host.hasPrefix("fd") { return true } // ULA
+            if host.hasPrefix("::ffff:") { return true }         // IPv4-mapped
+            return false
+        }
+
+        // Dotted-quad IPv4 in private / loopback / link-local / CGNAT ranges.
         if host.hasPrefix("127.") || host.hasPrefix("10.") || host.hasPrefix("192.168.") { return true }
-        if host.hasPrefix("169.254.") { return true } // Link-local
-        
+        if host.hasPrefix("169.254.") { return true }
+        if host == "0.0.0.0" { return true }
         if host.hasPrefix("172.") {
             let parts = host.split(separator: ".")
             if parts.count >= 2, let secondOctet = Int(parts[1]), (16...31).contains(secondOctet) {
                 return true
             }
         }
-        
+        if host.hasPrefix("100.") {
+            let parts = host.split(separator: ".")
+            if parts.count >= 2, let secondOctet = Int(parts[1]), (64...127).contains(secondOctet) {
+                return true // carrier-grade NAT 100.64.0.0/10
+            }
+        }
+
+        // Non-dotted numeric forms (decimal "2130706433", hex "0x7f000001")
+        // resolve to IPv4 addresses and bypass the dotted-quad checks above.
+        if host.hasPrefix("0x") { return true }
+        if !host.contains("."), host.allSatisfy({ $0.isNumber }) { return true }
+
+        // Octal-encoded dotted IPv4 (e.g. "0177.0.0.1" == 127.0.0.1). Only flag
+        // a fully-numeric dotted literal that has a leading-zero octet, so real
+        // hostnames like "0123.example.com" or public IPs like "93.184.216.34"
+        // are not falsely blocked.
+        let components = host.split(separator: ".")
+        let looksNumericLiteral = components.count >= 2 && components.allSatisfy { comp in
+            !comp.isEmpty && comp.allSatisfy { $0.isNumber }
+        }
+        if looksNumericLiteral, components.contains(where: { $0.count > 1 && $0.hasPrefix("0") }) {
+            return true
+        }
+
         return false
     }
-    
+}
+
+/// Per-task delegate that cancels any redirect to a host that wouldn't have
+/// passed the initial safety check, closing the redirect-based SSRF hole.
+final class SSRFRedirectGuard: NSObject, URLSessionTaskDelegate {
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        if let url = request.url, URLSafetyValidator.isAllowed(url) {
+            completionHandler(request)
+        } else {
+            // nil cancels the redirect; the task finishes with the 3xx response
+            // and the caller's status-code guard rejects it.
+            completionHandler(nil)
+        }
+    }
 }
 
 // MARK: - Errors

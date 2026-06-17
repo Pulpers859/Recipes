@@ -41,7 +41,9 @@ struct ShoppingListView: View {
     private var pantryAdjustedCount: Int { activeItems.filter { $0.pantryReductionAmount > 0 }.count }
 
     private var recipeLookup: [UUID: String] {
-        Dictionary(uniqueKeysWithValues: recipes.map { ($0.id, $0.title) })
+        // `uniquingKeysWith` rather than `uniqueKeysWithValues:` so a duplicate
+        // recipe id (e.g. after a backup restore) can't trap and crash the view.
+        Dictionary(recipes.map { ($0.id, $0.title) }, uniquingKeysWith: { first, _ in first })
     }
 
     var body: some View {
@@ -93,6 +95,8 @@ struct ShoppingListView: View {
             .alert("Clear All Items?", isPresented: $showClearConfirm) {
                 Button("Clear All", role: .destructive) { clearAll() }
                 Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("This removes all \(items.count) item\(items.count == 1 ? "" : "s") from your shopping list, including manually added ones. This can't be undone.")
             }
         }
     }

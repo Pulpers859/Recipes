@@ -345,6 +345,10 @@ struct RecipeEditorView: View {
         
         SpotlightIndexingService.shared.indexRecipe(recipe)
 
+        // Persist immediately rather than waiting for the autosave cycle, so an
+        // edit isn't lost if the app is killed right after the sheet dismisses.
+        try? modelContext.save()
+
         AnalyticsService.shared.track("recipe_saved", metadata: [
             "mode": isNewRecipe ? (isNewImport ? "import_new" : "manual_new") : "edit_existing",
             "ingredient_count": "\(recipe.ingredients.count)",

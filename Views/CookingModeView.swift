@@ -129,10 +129,11 @@ struct CookingModeView: View {
                 if !activeTimers.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 12) {
-                            ForEach(Array(activeTimers.keys), id: \.self) { id in
-                                if let timer = activeTimers[id] {
-                                    ActiveTimerPill(timer: timer)
-                                }
+                            // Sort by soonest-to-finish so pills keep a stable
+                            // order instead of reshuffling on every tick (a
+                            // Dictionary's key order is not stable).
+                            ForEach(activeTimers.values.sorted { $0.endDate < $1.endDate }) { timer in
+                                ActiveTimerPill(timer: timer)
                             }
                         }
                         .padding()

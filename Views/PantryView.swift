@@ -19,6 +19,8 @@ struct PantryView: View {
     @State private var showShareSheet = false
     @State private var shareURL: URL?
     @State private var showClearAllConfirm = false
+    @State private var showRestoreConfirm = false
+    @State private var canRestoreBackup = false
 
     /// The plan for the current calendar week, matching MealPlanView's
     /// week-scoped semantics (not "most recent plan ever created").
@@ -100,6 +102,16 @@ struct PantryView: View {
                             showClearAllConfirm = true
                         }
                     }
+
+                    // Surfaced only when a pre-clear snapshot exists to restore
+                    // from, so an accidental Clear All is recoverable.
+                    if canRestoreBackup {
+                        Button {
+                            showRestoreConfirm = true
+                        } label: {
+                            Label("Restore", systemImage: "arrow.uturn.backward")
+                        }
+                    }
                 }
             }
             .sheet(isPresented: $showShareSheet) {
@@ -111,10 +123,17 @@ struct PantryView: View {
                 Button("Clear All", role: .destructive) { clearAllPantryItems() }
                 Button("Cancel", role: .cancel) { }
             } message: {
-                Text("This will remove all \(pantryItems.count) pantry item(s). Your latest automatic backup will still be on this device.")
+                Text("This will remove all \(pantryItems.count) pantry item(s). A recovery snapshot is saved first — tap Restore afterward to bring them back.")
+            }
+            .alert("Restore pantry from backup?", isPresented: $showRestoreConfirm) {
+                Button("Restore") { restorePantryFromBackup() }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("This adds back items from your most recent recovery snapshot. Items already in your pantry are left untouched.")
             }
             .onAppear {
                 refreshAutomaticBackup()
+                canRestoreBackup = PantryBackupService.hasRestorableBackup()
             }
             .onChange(of: pantryBackupFingerprint) { _, _ in
                 refreshAutomaticBackup()
@@ -481,12 +500,62 @@ struct PantryView: View {
     }
 
     private func clearAllPantryItems() {
+        let count = pantryItems.count
+
+        // Capture a recovery snapshot to a dedicated file BEFORE deleting.
+        // The rolling automatic backup is about to be overwritten with the
+        // emptied pantry, so it can't be the recovery story here.
+        var snapshotSaved = true
+        do {
+            try PantryBackupService.writePreClearBackup(pantryItems: pantryItems)
+        } catch {
+            snapshotSaved = false
+        }
+
         for item in pantryItems {
             modelContext.delete(item)
         }
         if persistPantryChanges(snapshot: []) {
-            pantryStatusMessage = "Cleared pantry items."
-            AnalyticsService.shared.track("pantry_cleared")
+            canRestoreBackup = snapshotSaved && PantryBackupService.hasRestorableBackup()
+            pantryStatusMessage = canRestoreBackup
+                ? "Cleared \(count) pantry item(s). Tap Restore to bring them back."
+                : "Cleared \(count) pantry item(s)."
+            AnalyticsService.shared.track("pantry_cleared", metadata: ["count": "\(count)"])
+        }
+    }
+
+    private func restorePantryFromBackup() {
+        do {
+            let restored = try PantryBackupService.restoreFromPreClearBackup()
+            guard !restored.isEmpty else {
+                pantryStatusMessage = "No recovery snapshot found to restore."
+                return
+            }
+
+            // Don't duplicate items already present after a partial restore.
+            let existingKeys = Set(pantryItems.map {
+                ShoppingListService.normalizedIngredientKey($0.name)
+            })
+            var snapshot = pantryItems
+            var added = 0
+            for item in restored where !existingKeys.contains(ShoppingListService.normalizedIngredientKey(item.name)) {
+                modelContext.insert(item)
+                snapshot.append(item)
+                added += 1
+            }
+
+            guard added > 0 else {
+                pantryStatusMessage = "Those pantry items are already restored."
+                return
+            }
+
+            if persistPantryChanges(snapshot: snapshot) {
+                pantryStatusMessage = "Restored \(added) pantry item(s) from backup."
+                AnalyticsService.shared.track("pantry_restored", metadata: ["count": "\(added)"])
+            }
+        } catch {
+            pantryStatusMessage = "Could not restore pantry: \(error.localizedDescription)"
+            AnalyticsService.shared.track("pantry_restore_failed")
         }
     }
 

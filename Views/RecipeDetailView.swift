@@ -259,12 +259,13 @@ struct RecipeDetailView: View {
                         .frame(minWidth: 34)
 
                     Button {
-                        targetServings += 1
+                        if targetServings < 100 { targetServings += 1 }
                     } label: {
                         Image(systemName: "plus.circle.fill")
                             .font(.title2)
-                            .foregroundStyle(Color.rvAccent)
+                            .foregroundStyle(targetServings < 100 ? Color.rvAccent : Color.rvMuted)
                     }
+                    .disabled(targetServings >= 100)
                 }
 
                 if targetServings != recipe.servings {

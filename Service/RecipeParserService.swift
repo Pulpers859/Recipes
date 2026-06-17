@@ -71,7 +71,7 @@ class RecipeParserService: ObservableObject {
         
         // Step 3: Parse each chunk
         var recipes: [Recipe] = []
-        var skippedChunks = 0
+        var failedChunks: [String] = []
         for (index, chunk) in recipeChunks.enumerated() {
             parseProgress = "Parsing recipe \(index + 1) of \(recipeChunks.count)..."
 
@@ -79,22 +79,32 @@ class RecipeParserService: ObservableObject {
                 let recipe = try await parseSingleText(chunk, pdfData: nil, mode: mode)
                 recipes.append(recipe)
             } catch {
-                // If one recipe fails, continue with the rest — but keep an
-                // aggregate count so partial failures aren't silently
-                // overwritten by the next chunk's error.
-                skippedChunks += 1
+                // If one recipe fails, continue with the rest — but remember the
+                // chunk so a partial failure can be retried via batch AI below,
+                // instead of being silently lost.
+                failedChunks.append(chunk)
             }
         }
-        if skippedChunks > 0 {
-            lastError = "Skipped \(skippedChunks) of \(recipeChunks.count) detected recipe sections that couldn't be parsed."
+
+        // Retry ONLY the chunks that failed via batch AI (when available), so a
+        // cookbook where some sections parse and others don't doesn't quietly
+        // drop most of its recipes. Re-batching every chunk would duplicate the
+        // ones that already succeeded, so we feed it just the failures.
+        if !failedChunks.isEmpty && hasAPIKey {
+            parseProgress = "Retrying \(failedChunks.count) section(s) with batch AI extraction..."
+            if let recovered = try? await aiBatchParse(chunks: failedChunks, pdfData: nil) {
+                recipes.append(contentsOf: recovered)
+                let stillMissing = failedChunks.count - recovered.count
+                if stillMissing > 0 {
+                    lastError = "Skipped \(stillMissing) of \(recipeChunks.count) detected recipe sections that couldn't be parsed."
+                }
+            } else {
+                lastError = "Skipped \(failedChunks.count) of \(recipeChunks.count) detected recipe sections that couldn't be parsed."
+            }
+        } else if !failedChunks.isEmpty {
+            lastError = "Skipped \(failedChunks.count) of \(recipeChunks.count) detected recipe sections that couldn't be parsed."
         }
-        
-        // If AI batch is available, try batch parsing for better results
-        if recipes.isEmpty && hasAPIKey {
-            parseProgress = "Trying batch AI extraction..."
-            recipes = try await aiBatchParse(chunks: recipeChunks, pdfData: pdfData)
-        }
-        
+
         if recipes.isEmpty {
             throw ParserError.parseError("Could not extract any recipes from the document")
         }
@@ -493,11 +503,15 @@ class RecipeParserService: ObservableObject {
             case .steps:
                 stepLines.append(stripStepNumber(from: line))
             case .ingredients:
-                if looksNumberedStep {
+                if looksMeasured {
+                    // A measured line is an ingredient even if it happens to be
+                    // numbered ("1. 2 cups flour"); check this before the
+                    // numbered-step heuristic so numbered ingredient lists
+                    // aren't flipped wholesale into steps.
+                    ingredients.append(IngredientLineParser.parse(line))
+                } else if looksNumberedStep {
                     section = .steps
                     stepLines.append(stripStepNumber(from: line))
-                } else if looksMeasured {
-                    ingredients.append(IngredientLineParser.parse(line))
                 } else if line.hasSuffix(".") || line.count > 60 {
                     // Sentence-like lines after the ingredient list are almost
                     // always instructions even without a header.

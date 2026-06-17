@@ -27,15 +27,23 @@ enum MealPlanningService {
         for plan: MealPlan,
         recipes: [Recipe]
     ) -> [(recipe: Recipe, servings: Int)] {
-        let lookup = Dictionary(uniqueKeysWithValues: recipes.map { ($0.id, $0) })
+        // `uniquingKeysWith` instead of `uniqueKeysWithValues:` so a duplicate
+        // recipe id (possible after a backup restore or merge race) degrades
+        // gracefully instead of trapping and crashing shopping-list generation.
+        let lookup = Dictionary(recipes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+
+        // Clamp per-entry servings to a sane range so a corrupted/huge value
+        // can't overflow the running sum or scale ingredients into nonsense.
+        let maxServings = 9999
 
         var byID: [UUID: (recipe: Recipe, servings: Int)] = [:]
         for entry in plan.entries {
             guard let recipe = lookup[entry.recipeID] else { continue }
+            let clamped = max(0, min(entry.servings, maxServings))
             if let existing = byID[recipe.id] {
-                byID[recipe.id] = (recipe, existing.servings + entry.servings)
+                byID[recipe.id] = (recipe, min(existing.servings + clamped, maxServings))
             } else {
-                byID[recipe.id] = (recipe, entry.servings)
+                byID[recipe.id] = (recipe, clamped)
             }
         }
         return Array(byID.values)
@@ -49,15 +57,21 @@ enum MealPlanningService {
     static func removeEntries(forRecipeIDs ids: Set<UUID>, modelContext: ModelContext) {
         guard !ids.isEmpty else { return }
         let plans = (try? modelContext.fetch(FetchDescriptor<MealPlan>())) ?? []
+        var didChange = false
         for plan in plans where plan.entries.contains(where: { ids.contains($0.recipeID) }) {
-            plan.entries.removeAll { ids.contains($0.recipeID) }
+            // Reassign the whole array (rather than mutating in place) so
+            // SwiftData reliably registers the change to the stored value array.
+            plan.entries = plan.entries.filter { !ids.contains($0.recipeID) }
+            didChange = true
         }
+        if didChange { try? modelContext.save() }
     }
 
     /// Re-points entries at a surviving recipe after duplicate resolution so
     /// planned meals follow the merged recipe instead of disappearing.
     static func retargetEntries(fromRecipeID oldID: UUID, to canonical: Recipe, modelContext: ModelContext) {
         let plans = (try? modelContext.fetch(FetchDescriptor<MealPlan>())) ?? []
+        var didChange = false
         for plan in plans {
             guard plan.entries.contains(where: { $0.recipeID == oldID }) else { continue }
             var entries = plan.entries
@@ -66,6 +80,8 @@ enum MealPlanningService {
                 entries[index].recipeTitle = canonical.title
             }
             plan.entries = entries
+            didChange = true
         }
+        if didChange { try? modelContext.save() }
     }
 }
