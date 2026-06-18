@@ -5,6 +5,8 @@ Recipe Vault is a small SwiftUI + SwiftData iOS app. Optimize for recipe correct
 ## Repo Workflow
 
 - Use `PROJECT_HANDOFF.md` for repo path, Git workflow, migration, and branch-discipline rules.
+- Branch law: work only on `main` tracking `origin/main`. Do not use `dev`, PR branches, feature branches, side branches, or temporary reconciliation branches unless Patrick explicitly asks for one in the current conversation.
+- Before edits, fetch and fast-forward `main` from `origin/main`; commit and push completed changes directly to `origin/main`.
 - Keep `CLAUDE.md` focused on product architecture and bug-fix behavior; do not duplicate full repo bootstrap instructions here.
 
 ## Architecture
@@ -47,6 +49,7 @@ Recipe Vault is a small SwiftUI + SwiftData iOS app. Optimize for recipe correct
 ## Avoid
 
 - hidden auto-commits, auto-pushes, or mutating hooks
+- `dev`, PR branches, feature branches, side branches, or hooks that block direct commits to `main`
 - generic "improve the AI workflow" refactors
 - broad architecture churn without a specific product-quality payoff
 - touching multiple import layers at once unless the bug clearly spans them

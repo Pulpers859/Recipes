@@ -11,11 +11,12 @@
 
 ## Repo State
 - Stable branch: `main`
-- Working branch: `dev`
-- Expected default branch for normal work: `dev`
+- Working branch: `main`
+- Expected default branch for all normal work: `main`
+- Branch law: `Work only on origin/main. Do not use dev, PR branches, feature branches, side branches, or temporary reconciliation branches for normal work unless Patrick explicitly asks for one in the current conversation. All investigation, edits, commits, and pushes should happen on main after syncing origin/main.`
 - Sync-first rule: `Before normal work, fetch from the remote first. If the working tree is clean and the active branch tracks the expected upstream, pull with --ff-only before editing. If local changes exist, fetch and reconcile instead of blindly pulling.`
-- Current observed local state: `C:\Dev\Recipes is now the live Git repo, with main and dev pushed to origin. The Desktop/OneDrive copy should be treated as stale unless explicitly needed for recovery.`
-- Git bootstrap status: `completed locally with repo config, aliases, and a local hook blocking direct commits to main`
+- Current observed local state: `C:\Dev\Recipes is the live Git repo. origin/main is the source-of-truth branch and current GitHub default. Any dev branch is historical/stale unless Patrick explicitly says otherwise. The Desktop/OneDrive copy should be treated as stale unless explicitly needed for recovery.`
+- Git bootstrap status: `completed locally with repo config and aliases. Do not install hooks that block commits to main; this project intentionally commits and pushes directly on main.`
 
 ## If No Git Exists Yet
 If `git rev-parse --is-inside-work-tree` fails in the real project root, the agent should help re-establish the repo using this standard:
@@ -36,9 +37,10 @@ If `git rev-parse --is-inside-work-tree` fails in the real project root, the age
 9. run a secret scan and remove any live credentials from tracked files before connecting/pushing GitHub
 10. connect the GitHub remote if needed
 11. push `main`
-12. create and push `dev`
-13. add a local hook blocking direct commits to `main`
-14. create a dedicated PowerShell shortcut for this project
+12. set the local working branch to track `origin/main`
+13. do not create `dev` or PR-style working branches unless Patrick explicitly asks
+14. do not add a hook that blocks commits to `main`
+15. create a dedicated PowerShell shortcut for this project
 
 If the GitHub remote is unknown, the agent should finish local bootstrap first and only ask for the remote when push/setup is actually needed.
 
@@ -63,8 +65,9 @@ If the GitHub remote is unknown, the agent should finish local bootstrap first a
 - If validation, linting, or review logic is too rigid and rejects good output, improve the rule when appropriate instead of dumbing down the product.
 - Do not silently tolerate poor architecture if it is now a maintenance risk.
 - Handle Git operations when appropriate.
-- Keep normal work on `dev`, not `main`.
-- Before editing on an existing repo, run a fetch and check ahead/behind state; if clean, pull the tracked branch with `--ff-only`.
+- Keep normal work on `main`, tracking `origin/main`.
+- Never move normal work to `dev`, PR branches, feature branches, side branches, or temporary branches unless Patrick explicitly requests that branch in the current conversation.
+- Before editing on an existing repo, run `git fetch --all --prune`, switch to `main` if needed, verify it tracks `origin/main`, and pull with `--ff-only` when clean.
 - Audit adjacent risks after making fixes.
 - Run the checks that are realistically available in the current environment.
 - Clearly distinguish evidence-backed logic from heuristics.
@@ -90,7 +93,7 @@ After making changes, the agent should do another harsh pass focused on:
 
 ## What The User Wants By Default
 - The user describes the problem in chat.
-- The agent syncs from the tracked remote branch first so local files are current before investigation or edits.
+- The agent syncs `main` from `origin/main` first so local files are current before investigation or edits.
 - The agent investigates directly.
 - The agent makes code changes directly.
 - The agent audits adjacent risks.
@@ -104,7 +107,7 @@ The agent should confirm:
 2. current branch
 3. repo status cleanliness
 4. remote configuration
-5. whether the local branch is behind the remote and needs fetch/pull
+5. whether local `main` is behind `origin/main` and needs fetch/pull
 6. whether stale copies exist elsewhere
 7. whether the active folder is truly the source of truth
 
@@ -118,17 +121,15 @@ The agent should confirm:
 
 ## Git / Release Notes
 - Preferred everyday flow:
+  - `git switch main`
   - `git st`
+  - `git fetch --all --prune`
+  - `git pull --ff-only`
   - `git diff`
   - `git add .`
   - `git commit -m "..."`
-  - `git push`
-- Preferred promotion flow from `dev` to `main`:
-  - `git checkout main`
-  - `git pull --ff-only`
-  - `git merge --ff-only dev`
-  - `git push`
-  - `git checkout dev`
+  - `git push origin main`
+- There is no normal promotion flow from `dev` to `main`. `dev` is not the working branch for this project.
 
 ## Project-Specific Instructions For The Next Agent
 ```text
@@ -137,14 +138,16 @@ Active repo path: C:\Dev\Recipes
 Observed transitional copy: C:\Users\Patrick's Computer\OneDrive - WV School of Osteopathic Medicine\Desktop\Recipes
 GitHub remote: https://github.com/Pulpers859/Recipes.git
 Stable branch: main
-Working branch: dev
+Working branch: main
 
 Important:
 - Treat C:\Dev\Recipes as the source-of-truth repo.
 - Do not keep using the Desktop/OneDrive copy as the working repo unless explicitly asked to inspect a stale copy.
-- main and dev already exist on origin, and normal work should happen on dev.
+- origin/main is the only normal working branch. Do not use dev, PR branches, feature branches, or side branches unless Patrick explicitly asks in the current conversation.
+- If you find yourself on dev or any non-main branch, stop before editing, switch to main, fetch, and fast-forward from origin/main.
+- Do not recreate local hooks or workflow rules that block direct commits to main.
 - The current tracked snapshot still does not include an .xcodeproj file, so verify the full app container if buildable Xcode project files are expected.
 - Use the standard workflow: investigate directly, fix root causes, audit adjacent risks, run checks, and handle Git when appropriate.
-- Before starting normal work, fetch from origin and sync the active branch first when the working tree is clean. If the repo is dirty, fetch and reconcile instead of pulling blindly.
+- Before starting normal work, fetch from origin and sync main from origin/main first when the working tree is clean. If the repo is dirty, fetch and reconcile without switching away from main unless Patrick explicitly directs it.
 - Prioritize recipe correctness, import safety, backup compatibility, and user data protection over broad refactors.
 ```
