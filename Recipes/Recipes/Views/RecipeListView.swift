@@ -677,7 +677,7 @@ struct RecipeListView: View {
 
         // Drop meal-plan entries pointing at the deleted recipes so plans
         // don't keep showing meals that can no longer generate shopping items.
-        MealPlanningService.removeEntries(forRecipeIDs: selectedRecipeIDs, modelContext: modelContext)
+        MealPlanningService.removeEntries(forRecipeIDs: selectedRecipeIDs as! Set<UUID>, modelContext: modelContext)
 
         for recipe in toDelete {
             SpotlightIndexingService.shared.removeRecipe(recipe)
