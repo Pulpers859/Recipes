@@ -18,7 +18,7 @@ struct RecipeListView: View {
     @State private var showFavoritesOnly = false
     @State private var sortOrder: SortOrder = .dateAdded
     @State private var isSelectionMode = false
-    @State private var selectedRecipeIDs: Set<UUID> = []
+    @State private var selectedRecipeIDs: Set<PersistentIdentifier> = []
     @State private var showDeleteSelectedConfirm = false
     @State private var navigationPath: [RecipeRoute] = []
     @State private var pendingSpotlightRecipeID: UUID?
@@ -282,7 +282,9 @@ struct RecipeListView: View {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 14) {
                                 ForEach(pantrySuggestions) { suggestion in
-                                    NavigationLink(value: RecipeRoute(recipeID: suggestion.recipe.id)) {
+                                    NavigationLink {
+                                        RecipeDetailView(recipe: suggestion.recipe)
+                                    } label: {
                                         pantrySuggestionCard(suggestion)
                                     }
                                     .buttonStyle(.plain)
@@ -316,20 +318,22 @@ struct RecipeListView: View {
                             .padding(.horizontal)
                     } else {
                         LazyVStack(spacing: 16) {
-                            ForEach(filteredRecipes) { recipe in
+                            ForEach(filteredRecipes, id: \.persistentModelID) { recipe in
                                 if isSelectionMode {
                                     Button {
-                                        toggleRecipeSelection(recipe.id)
+                                        toggleRecipeSelection(recipe.persistentModelID)
                                     } label: {
                                         RecipeCardView(
                                             recipe: recipe,
                                             selectionMode: true,
-                                            isSelected: selectedRecipeIDs.contains(recipe.id)
+                                            isSelected: selectedRecipeIDs.contains(recipe.persistentModelID)
                                         )
                                     }
                                     .buttonStyle(.plain)
                                 } else {
-                                    NavigationLink(value: RecipeRoute(recipeID: recipe.id)) {
+                                    NavigationLink {
+                                        RecipeDetailView(recipe: recipe)
+                                    } label: {
                                         RecipeCardView(recipe: recipe)
                                     }
                                     .buttonStyle(.plain)
@@ -655,7 +659,7 @@ struct RecipeListView: View {
         }
     }
 
-    private func toggleRecipeSelection(_ id: UUID) {
+    private func toggleRecipeSelection(_ id: PersistentIdentifier) {
         if selectedRecipeIDs.contains(id) {
             selectedRecipeIDs.remove(id)
         } else {
@@ -665,7 +669,7 @@ struct RecipeListView: View {
 
     private func deleteSelectedRecipes() {
         guard !selectedRecipeIDs.isEmpty else { return }
-        let toDelete = recipes.filter { selectedRecipeIDs.contains($0.id) }
+        let toDelete = recipes.filter { selectedRecipeIDs.contains($0.persistentModelID) }
         let count = toDelete.count
 
         // Best-effort safety backup of the whole library before a bulk delete.
@@ -730,7 +734,7 @@ private struct PantrySuggestion: Identifiable {
     let totalIngredients: Int
     let score: Double
 
-    var id: UUID { recipe.id }
+    var id: PersistentIdentifier { recipe.persistentModelID }
 }
 
 private struct SectionHeaderView: View {
@@ -872,6 +876,7 @@ struct RecipeCardView: View {
         }
         .padding(16)
         .background(Color.white.opacity(0.92))
+        .contentShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 28, style: .continuous)

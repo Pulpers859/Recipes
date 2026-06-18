@@ -16,6 +16,8 @@ struct MealPlanView: View {
     @State private var recipeSearchText = ""
     @State private var showShoppingConfirmation = false
     @State private var generatedItemCount = 0
+    @State private var actionErrorMessage: String?
+
     /// Weeks relative to the current week (0 = this week, 1 = next week).
     @State private var weekOffset = 0
 
@@ -98,6 +100,14 @@ struct MealPlanView: View {
                 Button("Stay Here", role: .cancel) { }
             } message: {
                 Text("\(generatedItemCount) items added to your shopping list.")
+            }
+            .alert("Couldn’t Save Changes", isPresented: Binding(
+                get: { actionErrorMessage != nil },
+                set: { if !$0 { actionErrorMessage = nil } }
+            )) {
+                Button("OK", role: .cancel) { actionErrorMessage = nil }
+            } message: {
+                Text(actionErrorMessage ?? "An unknown error occurred.")
             }
             .onAppear {
                 migrateLegacyPlanIfNeeded()
@@ -392,7 +402,8 @@ struct MealPlanView: View {
             servings: recipe.servings
         )
         plan.entries.append(entry)
-        try? modelContext.save()
+        guard saveChanges(failureMessage: "Could not add this meal to your plan") else { return }
+
         AnalyticsService.shared.track("meal_plan_entry_added", metadata: [
             "slot": slot.rawValue,
             "day": "\(selectedDay)"
@@ -402,7 +413,7 @@ struct MealPlanView: View {
     private func removeEntry(_ entry: MealPlanEntry) {
         guard let plan = currentPlan else { return }
         plan.entries.removeAll { $0.id == entry.id }
-        try? modelContext.save()
+        guard saveChanges(failureMessage: "Could not remove this meal from your plan") else { return }
     }
 
     private func generateShoppingList() {
@@ -417,6 +428,7 @@ struct MealPlanView: View {
             pantryItems: pantryItems,
             modelContext: modelContext
         )
+        guard saveChanges(failureMessage: "Could not update your shopping list") else { return }
 
         generatedItemCount = count
         showShoppingConfirmation = true
@@ -430,5 +442,17 @@ struct MealPlanView: View {
         let plan = MealPlan(weekStartDate: displayedWeekStart)
         modelContext.insert(plan)
         return plan
+    }
+
+    private func saveChanges(failureMessage: String) -> Bool {
+        do {
+            try modelContext.save()
+            return true
+        } catch {
+            modelContext.rollback()
+            actionErrorMessage = "\(failureMessage): \(error.localizedDescription)"
+            AnalyticsService.shared.track("meal_plan_save_failed")
+            return false
+        }
     }
 }

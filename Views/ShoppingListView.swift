@@ -10,6 +10,7 @@ struct ShoppingListView: View {
     @State private var newItemName = ""
     @State private var showClearConfirm = false
     @State private var showPickedUpItems = false
+    @State private var actionErrorMessage: String?
 
     private var activeItems: [ShoppingItem] {
         items.filter { !$0.isChecked }
@@ -97,6 +98,14 @@ struct ShoppingListView: View {
                 Button("Cancel", role: .cancel) { }
             } message: {
                 Text("This removes all \(items.count) item\(items.count == 1 ? "" : "s") from your shopping list, including manually added ones. This can't be undone.")
+            }
+            .alert("Couldn’t Save Changes", isPresented: Binding(
+                get: { actionErrorMessage != nil },
+                set: { if !$0 { actionErrorMessage = nil } }
+            )) {
+                Button("OK", role: .cancel) { actionErrorMessage = nil }
+            } message: {
+                Text(actionErrorMessage ?? "An unknown error occurred.")
             }
         }
     }
@@ -273,6 +282,7 @@ struct ShoppingListView: View {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     item.isChecked.toggle()
                 }
+                _ = saveChanges(failureMessage: "Could not update this shopping item")
             } label: {
                 Image(systemName: item.isChecked ? "checkmark.circle.fill" : "circle")
                     .font(.title2)
@@ -452,6 +462,8 @@ struct ShoppingListView: View {
             category: ShoppingListService.suggestedCategory(for: parsed.name)
         )
         modelContext.insert(item)
+        guard saveChanges(failureMessage: "Could not add this shopping item") else { return }
+
         AnalyticsService.shared.track("shopping_item_added_manual")
         newItemName = ""
     }
@@ -461,6 +473,8 @@ struct ShoppingListView: View {
         for item in pickedUpItems {
             modelContext.delete(item)
         }
+        guard saveChanges(failureMessage: "Could not clear picked up items") else { return }
+
         if removed > 0 {
             AnalyticsService.shared.track("shopping_clear_checked", metadata: ["count": "\(removed)"])
         }
@@ -471,6 +485,8 @@ struct ShoppingListView: View {
         for item in items {
             modelContext.delete(item)
         }
+        guard saveChanges(failureMessage: "Could not clear the shopping list") else { return }
+
         if removed > 0 {
             AnalyticsService.shared.track("shopping_clear_all", metadata: ["count": "\(removed)"])
         }
@@ -496,6 +512,8 @@ struct ShoppingListView: View {
         }
 
         modelContext.delete(shoppingItem)
+        guard saveChanges(failureMessage: "Could not move this item to the pantry") else { return }
+
         AnalyticsService.shared.track("shopping_item_stocked_to_pantry")
     }
 
@@ -562,5 +580,17 @@ struct ShoppingListView: View {
             return nil
         }
         return numerator / denominator
+    }
+
+    private func saveChanges(failureMessage: String) -> Bool {
+        do {
+            try modelContext.save()
+            return true
+        } catch {
+            modelContext.rollback()
+            actionErrorMessage = "\(failureMessage): \(error.localizedDescription)"
+            AnalyticsService.shared.track("shopping_list_save_failed")
+            return false
+        }
     }
 }
