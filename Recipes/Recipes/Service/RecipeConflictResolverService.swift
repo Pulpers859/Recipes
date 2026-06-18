@@ -55,7 +55,7 @@ enum RecipeConflictResolverService {
     /// non-empty source URL matches, that's strong evidence of duplication.
     /// For title-only matches, require the ingredient lists to substantially
     /// overlap before destructively merging.
-    private static func isConfidentDuplicate(_ candidate: Recipe, of canonical: Recipe) -> Bool {
+    private nonisolated static func isConfidentDuplicate(_ candidate: Recipe, of canonical: Recipe) -> Bool {
         let source = (canonical.sourceURL ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if !source.isEmpty { return true }
 
@@ -75,13 +75,13 @@ enum RecipeConflictResolverService {
         return Double(overlap) / Double(union) >= 0.8
     }
 
-    private static func ingredientKeySet(_ recipe: Recipe) -> Set<String> {
+    private nonisolated static func ingredientKeySet(_ recipe: Recipe) -> Set<String> {
         Set(recipe.normalizedIngredients.map {
             ShoppingListService.normalizedIngredientKey($0.name)
         })
     }
 
-    private static func fingerprint(_ recipe: Recipe) -> String {
+    private nonisolated static func fingerprint(_ recipe: Recipe) -> String {
         let title = recipe.title
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
@@ -91,7 +91,7 @@ enum RecipeConflictResolverService {
         return "\(title)::\(source)"
     }
     
-    private static func qualityScore(_ recipe: Recipe) -> Int {
+    private nonisolated static func qualityScore(_ recipe: Recipe) -> Int {
         var score = 0
         score += recipe.ingredients.count * 2
         score += recipe.steps.count * 3

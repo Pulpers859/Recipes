@@ -129,7 +129,7 @@ class ShoppingListService {
     /// Extracts the BASE ingredient for deduplication.
     /// "200g liquid egg whites" and "32oz egg whites" both → "egg whites"
     /// "fat-free cheddar cheese" and "cheddar cheese" both → "cheddar cheese"
-    static func normalizedIngredientKey(_ name: String) -> String {
+    nonisolated static func normalizedIngredientKey(_ name: String) -> String {
         mergeKey(name: name)
     }
     
@@ -157,7 +157,7 @@ class ShoppingListService {
     /// English-only by design — the whole app currently is. Brand names do
     /// not belong in this list; they get handled by the suffix rules below
     /// (" or similar", " of choice") when recipes phrase them that way.
-    private static let qualifierPrefixes = [
+    private nonisolated static let qualifierPrefixes = [
         "liquid ", "fresh ", "dried ", "large ", "small ", "medium ",
         "chopped ", "diced ", "minced ", "sliced ", "shredded ", "grated ",
         "fat-free ", "fat free ", "nonfat ", "non-fat ", "low-fat ", "lowfat ",
@@ -166,7 +166,7 @@ class ShoppingListService {
         "light ", "sugar-free ", "sugar free ", "whole wheat ",
     ]
 
-    private static let qualifierSuffixes = [
+    private nonisolated static let qualifierSuffixes = [
         ", divided", ", to taste", " to taste", "(optional)", ", diced",
         ", chopped", ", sliced", ", minced",
         " or similar", " of choice",
@@ -175,7 +175,7 @@ class ShoppingListService {
     /// Substring → canonical replacements. Self-mapping entries are not
     /// no-ops: "sharp cheddar cheese" matching "cheddar cheese" collapses to
     /// the canonical form. First match wins.
-    private static let synonyms: [(pattern: String, canonical: String)] = [
+    private nonisolated static let synonyms: [(pattern: String, canonical: String)] = [
         ("egg whites?$", "egg whites"),
         ("^eggs?$", "eggs"),
         ("whole milk", "milk"),
@@ -190,7 +190,7 @@ class ShoppingListService {
         ("greek yogurt", "greek yogurt"),
     ]
 
-    private static func mergeKey(name: String) -> String {
+    private nonisolated static func mergeKey(name: String) -> String {
         var s = name.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
 
         // Strip leading amounts that might be baked into the name (e.g. "150g liquid egg whites")

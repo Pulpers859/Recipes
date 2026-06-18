@@ -352,7 +352,7 @@ struct RecipeEditorView: View {
 
         // Persist immediately rather than waiting for the autosave cycle, so an
         // edit isn't lost if the app is killed right after the sheet dismisses.
-        try? modelContext.save()
+        _ = try? modelContext.save()
 
         AnalyticsService.shared.track("recipe_saved", metadata: [
             "mode": isNewRecipe ? (isNewImport ? "import_new" : "manual_new") : "edit_existing",

@@ -111,7 +111,7 @@ struct RecipeDetailView: View {
         // Best-effort safety backup so a mistaken delete is recoverable via
         // "Import from JSON Backup" — there is no undo.
         if let allRecipes = try? modelContext.fetch(FetchDescriptor<Recipe>()) {
-            try? RecipeExportService.writeAutomaticBackup(recipes: allRecipes)
+            _ = try? RecipeExportService.writeAutomaticBackup(recipes: allRecipes)
         }
         MealPlanningService.removeEntries(forRecipeIDs: [recipe.id], modelContext: modelContext)
         SpotlightIndexingService.shared.removeRecipe(recipe)

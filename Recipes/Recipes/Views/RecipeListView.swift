@@ -673,11 +673,11 @@ struct RecipeListView: View {
         let count = toDelete.count
 
         // Best-effort safety backup of the whole library before a bulk delete.
-        try? RecipeExportService.writeAutomaticBackup(recipes: recipes)
+        _ = try? RecipeExportService.writeAutomaticBackup(recipes: recipes)
 
         // Drop meal-plan entries pointing at the deleted recipes so plans
         // don't keep showing meals that can no longer generate shopping items.
-        MealPlanningService.removeEntries(forRecipeIDs: selectedRecipeIDs as! Set<UUID>, modelContext: modelContext)
+        MealPlanningService.removeEntries(forRecipeIDs: Set(toDelete.map(\.id)), modelContext: modelContext)
 
         for recipe in toDelete {
             SpotlightIndexingService.shared.removeRecipe(recipe)
