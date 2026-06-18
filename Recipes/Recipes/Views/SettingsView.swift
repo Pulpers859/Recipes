@@ -460,6 +460,17 @@ struct SettingsView: View {
             existingFingerprints.insert(fingerprint)
             insertedCount += 1
         }
+
+        do {
+            try modelContext.save()
+        } catch {
+            modelContext.rollback()
+            throw NSError(
+                domain: "RecipeVault.Import",
+                code: 4,
+                userInfo: [NSLocalizedDescriptionKey: "Recipes were decoded, but could not be saved: \(error.localizedDescription)"]
+            )
+        }
         
         if skippedCount > 0 {
             importResult = "Imported \(insertedCount) recipes (\(skippedCount) duplicates skipped)."
@@ -536,33 +547,58 @@ struct SettingsView: View {
 
         // Write a safety backup first so this destructive action is recoverable
         // via "Import from JSON Backup".
-        var backupSucceeded = true
         do {
             try RecipeExportService.writeAutomaticBackup(recipes: recipes)
         } catch {
-            backupSucceeded = false
+            importResult = "Nothing was deleted because the safety backup could not be written."
+            AnalyticsService.shared.track("recipes_delete_all_backup_failed")
+            return
         }
 
         // Meal-plan entries for deleted recipes would linger in the plan UI
         // but silently drop out of shopping-list generation.
-        MealPlanningService.removeEntries(
-            forRecipeIDs: Set(recipes.map { $0.id }),
-            modelContext: modelContext
-        )
+        do {
+            try MealPlanningService.removeEntries(
+                forRecipeIDs: Set(recipes.map { $0.id }),
+                modelContext: modelContext
+            )
+        } catch {
+            modelContext.rollback()
+            importResult = "Nothing was deleted because meal plan cleanup could not be saved: \(error.localizedDescription)"
+            AnalyticsService.shared.track("recipes_delete_all_plan_cleanup_failed")
+            return
+        }
 
         for recipe in recipes {
             modelContext.delete(recipe)
         }
+
+        do {
+            try modelContext.save()
+        } catch {
+            modelContext.rollback()
+            importResult = "The recipes were not deleted because the change could not be saved: \(error.localizedDescription)"
+            AnalyticsService.shared.track("recipes_delete_all_save_failed")
+            return
+        }
+
         SpotlightIndexingService.shared.removeAllRecipes()
 
-        importResult = backupSucceeded
-            ? "Deleted \(count) recipes. A safety backup was saved on this device."
-            : "Deleted \(count) recipes. Warning: the safety backup could not be written."
+        importResult = "Deleted \(count) recipes. A safety backup was saved on this device."
         AnalyticsService.shared.track("recipes_all_deleted", metadata: ["count": "\(count)"])
     }
 
     private func resolveConflicts() {
         let result = RecipeConflictResolverService.resolveRecipeConflicts(recipes: recipes, modelContext: modelContext)
+        do {
+            try modelContext.save()
+        } catch {
+            modelContext.rollback()
+            syncResult = "Duplicate cleanup could not be saved: \(error.localizedDescription)"
+            AnalyticsService.shared.track("resolve_recipe_conflicts_save_failed")
+            return
+        }
+
         if result.deletedDuplicates == 0 {
             syncResult = "No duplicate recipe conflicts found."
         } else {

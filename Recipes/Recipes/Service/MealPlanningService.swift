@@ -54,17 +54,16 @@ enum MealPlanningService {
     /// Removes meal-plan entries pointing at deleted recipes. Call this
     /// whenever recipes are deleted, otherwise orphaned entries linger in the
     /// plan UI but silently drop out of shopping-list generation.
-    static func removeEntries(forRecipeIDs ids: Set<UUID>, modelContext: ModelContext) {
+    /// The caller owns the final `modelContext.save()` so recipe deletion and
+    /// meal-plan cleanup commit or roll back together.
+    static func removeEntries(forRecipeIDs ids: Set<UUID>, modelContext: ModelContext) throws {
         guard !ids.isEmpty else { return }
-        let plans = (try? modelContext.fetch(FetchDescriptor<MealPlan>())) ?? []
-        var didChange = false
+        let plans = try modelContext.fetch(FetchDescriptor<MealPlan>())
         for plan in plans where plan.entries.contains(where: { ids.contains($0.recipeID) }) {
             // Reassign the whole array (rather than mutating in place) so
             // SwiftData reliably registers the change to the stored value array.
             plan.entries = plan.entries.filter { !ids.contains($0.recipeID) }
-            didChange = true
         }
-        if didChange { try? modelContext.save() }
     }
 
     /// Re-points entries at a surviving recipe after duplicate resolution so

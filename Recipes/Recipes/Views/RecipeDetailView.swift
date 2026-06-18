@@ -3,6 +3,7 @@ import SwiftData
 import UIKit
 
 struct RecipeDetailView: View {
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Bindable var recipe: Recipe
 
@@ -13,6 +14,7 @@ struct RecipeDetailView: View {
     @State private var showShareRecipe = false
     @State private var selectedPhotoIndex = 0
     @State private var showPhotoViewer = false
+    @State private var actionErrorMessage: String?
 
     init(recipe: Recipe) {
         self.recipe = recipe
@@ -46,6 +48,7 @@ struct RecipeDetailView: View {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {
                     recipe.isFavorite.toggle()
+                    saveRecipeChange(failureMessage: "Could not update favorite status")
                 } label: {
                     Image(systemName: recipe.isFavorite ? "heart.fill" : "heart")
                         .foregroundStyle(recipe.isFavorite ? .red : Color.rvSubtleText)
@@ -68,6 +71,7 @@ struct RecipeDetailView: View {
                     Button("Mark as Cooked", systemImage: "checkmark.circle") {
                         recipe.timesCooked += 1
                         recipe.dateLastCooked = Date()
+                        saveRecipeChange(failureMessage: "Could not mark this recipe as cooked")
                     }
 
                     Divider()
@@ -103,19 +107,57 @@ struct RecipeDetailView: View {
         .sheet(isPresented: $showShareRecipe) {
             RecipeShareView(recipe: recipe)
         }
+        .alert("Recipe Vault Couldn’t Finish", isPresented: Binding(
+            get: { actionErrorMessage != nil },
+            set: { if !$0 { actionErrorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { actionErrorMessage = nil }
+        } message: {
+            Text(actionErrorMessage ?? "An unknown error occurred.")
+        }
     }
 
     // MARK: - Actions
 
     private func deleteRecipe() {
-        // Best-effort safety backup so a mistaken delete is recoverable via
-        // "Import from JSON Backup" — there is no undo.
-        if let allRecipes = try? modelContext.fetch(FetchDescriptor<Recipe>()) {
-            _ = try? RecipeExportService.writeAutomaticBackup(recipes: allRecipes)
+        do {
+            let allRecipes = try modelContext.fetch(FetchDescriptor<Recipe>())
+            _ = try RecipeExportService.writeAutomaticBackup(recipes: allRecipes)
+        } catch {
+            actionErrorMessage = "Nothing was deleted because the safety backup could not be saved: \(error.localizedDescription)"
+            AnalyticsService.shared.track("recipe_delete_backup_failed")
+            return
         }
-        MealPlanningService.removeEntries(forRecipeIDs: [recipe.id], modelContext: modelContext)
-        SpotlightIndexingService.shared.removeRecipe(recipe)
+
+        do {
+            try MealPlanningService.removeEntries(forRecipeIDs: [recipe.id], modelContext: modelContext)
+        } catch {
+            modelContext.rollback()
+            actionErrorMessage = "Nothing was deleted because the meal plan cleanup could not be saved: \(error.localizedDescription)"
+            AnalyticsService.shared.track("recipe_delete_plan_cleanup_failed")
+            return
+        }
         modelContext.delete(recipe)
+
+        do {
+            try modelContext.save()
+            SpotlightIndexingService.shared.removeRecipe(recipe)
+            dismiss()
+        } catch {
+            modelContext.rollback()
+            actionErrorMessage = "The recipe was not deleted because the change could not be saved: \(error.localizedDescription)"
+            AnalyticsService.shared.track("recipe_delete_save_failed")
+        }
+    }
+
+    private func saveRecipeChange(failureMessage: String) {
+        do {
+            try modelContext.save()
+        } catch {
+            modelContext.rollback()
+            actionErrorMessage = "\(failureMessage): \(error.localizedDescription)"
+            AnalyticsService.shared.track("recipe_detail_save_failed")
+        }
     }
 
     // MARK: - Photos

@@ -18,8 +18,9 @@ struct RecipeListView: View {
     @State private var showFavoritesOnly = false
     @State private var sortOrder: SortOrder = .dateAdded
     @State private var isSelectionMode = false
-    @State private var selectedRecipeIDs: Set<PersistentIdentifier> = []
+    @State private var selectedRecipeIDs: Set<UUID> = []
     @State private var showDeleteSelectedConfirm = false
+    @State private var actionErrorMessage: String?
     @State private var navigationPath: [RecipeRoute] = []
     @State private var pendingSpotlightRecipeID: UUID?
     @State private var spotlightRouteAttempts = 0
@@ -177,7 +178,15 @@ struct RecipeListView: View {
                 Button("Delete", role: .destructive) { deleteSelectedRecipes() }
                 Button("Cancel", role: .cancel) { }
             } message: {
-                Text("This will permanently delete \(selectedRecipeIDs.count) recipe(s).")
+                Text("This permanently deletes \(selectedRecipeIDs.count) recipe(s). A safety backup must be saved first.")
+            }
+            .alert("Recipe Vault Couldn’t Finish", isPresented: Binding(
+                get: { actionErrorMessage != nil },
+                set: { if !$0 { actionErrorMessage = nil } }
+            )) {
+                Button("OK", role: .cancel) { actionErrorMessage = nil }
+            } message: {
+                Text(actionErrorMessage ?? "An unknown error occurred.")
             }
         }
     }
@@ -282,9 +291,7 @@ struct RecipeListView: View {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 14) {
                                 ForEach(pantrySuggestions) { suggestion in
-                                    NavigationLink {
-                                        RecipeDetailView(recipe: suggestion.recipe)
-                                    } label: {
+                                    NavigationLink(value: RecipeRoute(recipeID: suggestion.recipe.id)) {
                                         pantrySuggestionCard(suggestion)
                                     }
                                     .buttonStyle(.plain)
@@ -318,22 +325,20 @@ struct RecipeListView: View {
                             .padding(.horizontal)
                     } else {
                         LazyVStack(spacing: 16) {
-                            ForEach(filteredRecipes, id: \.persistentModelID) { recipe in
+                            ForEach(filteredRecipes, id: \.id) { recipe in
                                 if isSelectionMode {
                                     Button {
-                                        toggleRecipeSelection(recipe.persistentModelID)
+                                        toggleRecipeSelection(recipe.id)
                                     } label: {
                                         RecipeCardView(
                                             recipe: recipe,
                                             selectionMode: true,
-                                            isSelected: selectedRecipeIDs.contains(recipe.persistentModelID)
+                                            isSelected: selectedRecipeIDs.contains(recipe.id)
                                         )
                                     }
                                     .buttonStyle(.plain)
                                 } else {
-                                    NavigationLink {
-                                        RecipeDetailView(recipe: recipe)
-                                    } label: {
+                                    NavigationLink(value: RecipeRoute(recipeID: recipe.id)) {
                                         RecipeCardView(recipe: recipe)
                                     }
                                     .buttonStyle(.plain)
@@ -659,7 +664,7 @@ struct RecipeListView: View {
         }
     }
 
-    private func toggleRecipeSelection(_ id: PersistentIdentifier) {
+    private func toggleRecipeSelection(_ id: UUID) {
         if selectedRecipeIDs.contains(id) {
             selectedRecipeIDs.remove(id)
         } else {
@@ -669,19 +674,48 @@ struct RecipeListView: View {
 
     private func deleteSelectedRecipes() {
         guard !selectedRecipeIDs.isEmpty else { return }
-        let toDelete = recipes.filter { selectedRecipeIDs.contains($0.persistentModelID) }
+        let toDelete = recipes.filter { selectedRecipeIDs.contains($0.id) }
         let count = toDelete.count
+        guard count > 0 else {
+            selectedRecipeIDs.removeAll()
+            isSelectionMode = false
+            return
+        }
 
-        // Best-effort safety backup of the whole library before a bulk delete.
-        _ = try? RecipeExportService.writeAutomaticBackup(recipes: recipes)
+        do {
+            _ = try RecipeExportService.writeAutomaticBackup(recipes: recipes)
+        } catch {
+            actionErrorMessage = "Nothing was deleted because the safety backup could not be saved: \(error.localizedDescription)"
+            AnalyticsService.shared.track("recipes_bulk_delete_backup_failed")
+            return
+        }
 
         // Drop meal-plan entries pointing at the deleted recipes so plans
         // don't keep showing meals that can no longer generate shopping items.
-        MealPlanningService.removeEntries(forRecipeIDs: Set(toDelete.map(\.id)), modelContext: modelContext)
+        do {
+            try MealPlanningService.removeEntries(forRecipeIDs: Set(toDelete.map(\.id)), modelContext: modelContext)
+        } catch {
+            modelContext.rollback()
+            actionErrorMessage = "Nothing was deleted because the meal plan cleanup could not be saved: \(error.localizedDescription)"
+            AnalyticsService.shared.track("recipes_bulk_delete_plan_cleanup_failed")
+            return
+        }
+
+        for recipe in toDelete {
+            modelContext.delete(recipe)
+        }
+
+        do {
+            try modelContext.save()
+        } catch {
+            modelContext.rollback()
+            actionErrorMessage = "The recipes were not deleted because the change could not be saved: \(error.localizedDescription)"
+            AnalyticsService.shared.track("recipes_bulk_delete_save_failed")
+            return
+        }
 
         for recipe in toDelete {
             SpotlightIndexingService.shared.removeRecipe(recipe)
-            modelContext.delete(recipe)
         }
 
         AnalyticsService.shared.track("recipes_bulk_deleted", metadata: [
@@ -734,7 +768,7 @@ private struct PantrySuggestion: Identifiable {
     let totalIngredients: Int
     let score: Double
 
-    var id: PersistentIdentifier { recipe.persistentModelID }
+    var id: UUID { recipe.id }
 }
 
 private struct SectionHeaderView: View {

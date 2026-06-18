@@ -27,6 +27,7 @@ struct RecipeEditorView: View {
     @State private var selectedPhotoItems: [PhotosPickerItem] = []
     @State private var showPhotoViewer = false
     @State private var selectedPhotoIndex = 0
+    @State private var saveErrorMessage: String?
     
     @State private var newIngredientName = ""
     @State private var newIngredientAmount = ""
@@ -268,6 +269,14 @@ struct RecipeEditorView: View {
                 }
             }
         }
+        .alert("Couldn’t Save Recipe", isPresented: Binding(
+            get: { saveErrorMessage != nil },
+            set: { if !$0 { saveErrorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { saveErrorMessage = nil }
+        } message: {
+            Text(saveErrorMessage ?? "An unknown error occurred.")
+        }
         // A swipe-down would silently discard every edit (or keep an
         // unreviewed import). Force an explicit Cancel/Save decision.
         .interactiveDismissDisabled()
@@ -280,8 +289,16 @@ struct RecipeEditorView: View {
     /// "Cancel" silently keeps an unreviewed import in the library.
     private func cancelEditing() {
         if isNewImport, recipe.modelContext != nil {
-            SpotlightIndexingService.shared.removeRecipe(recipe)
             modelContext.delete(recipe)
+            do {
+                try modelContext.save()
+                SpotlightIndexingService.shared.removeRecipe(recipe)
+            } catch {
+                modelContext.rollback()
+                saveErrorMessage = "The unreviewed import could not be removed: \(error.localizedDescription)"
+                AnalyticsService.shared.track("recipe_import_cancel_delete_failed")
+                return
+            }
         }
         dismiss()
     }
@@ -348,11 +365,18 @@ struct RecipeEditorView: View {
             modelContext.insert(recipe)
         }
         
-        SpotlightIndexingService.shared.indexRecipe(recipe)
-
         // Persist immediately rather than waiting for the autosave cycle, so an
         // edit isn't lost if the app is killed right after the sheet dismisses.
-        _ = try? modelContext.save()
+        do {
+            try modelContext.save()
+        } catch {
+            modelContext.rollback()
+            saveErrorMessage = "Your edits are still on screen, but they were not saved: \(error.localizedDescription)"
+            AnalyticsService.shared.track("recipe_save_failed")
+            return
+        }
+
+        SpotlightIndexingService.shared.indexRecipe(recipe)
 
         AnalyticsService.shared.track("recipe_saved", metadata: [
             "mode": isNewRecipe ? (isNewImport ? "import_new" : "manual_new") : "edit_existing",
