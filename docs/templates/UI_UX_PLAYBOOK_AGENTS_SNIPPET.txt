@@ -1,0 +1,5 @@
+When evaluating external UI/UX resources, component libraries, design systems, visual reference sites, or design-oriented agent skills for Recipe Vault, read docs/UI_UX_FOUNDATION.md and docs/AI_UI_UX_RESOURCE_EVALUATION_PLAYBOOK.md first.
+
+Do not use this for every UI task. Use it for design-system decisions, component library selection, redesign planning, flow research, or deciding whether an outside UI/UX resource should influence the app.
+
+Recipe Vault is a native SwiftUI app. External web resources are research inputs only, not implementation authority.

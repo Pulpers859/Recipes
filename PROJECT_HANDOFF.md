@@ -114,6 +114,7 @@ The agent should confirm:
 ## Architecture / Product Notes
 - Main product purpose: `Recipe Vault stores recipes, imports them from text/PDF/image/URL sources, and supports pantry, shopping list, meal planning, sharing, and backup flows.`
 - Key modules or directories: `Views/`, `Models/`, `Service/`, `Extensions/`, `extract_*.py`, `CLAUDE.md`, `.claude/skills/`
+- UI/UX foundation: `docs/UI_UX_FOUNDATION.md`, `docs/AI_UI_UX_RESOURCE_EVALUATION_PLAYBOOK.md`, `.claude/skills/ui-ux-resource-eval.md`, and shared SwiftUI primitives in `Extensions/Theme.swift`
 - Known fragile areas: `recipe parsing/import correctness, multi-recipe splitting, backup/import/export compatibility, duplicate resolution, shopping/pantry data flow, destructive cleanup, and config/secret handling`
 - Important evidence/product constraints: `recipe correctness and user data safety matter more than broad refactors or AI process churn`
 - Runtime environments that matter: `iOS simulator, iOS device, and local Python script execution for import utilities`

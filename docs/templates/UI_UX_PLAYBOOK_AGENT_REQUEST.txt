@@ -1,0 +1,5 @@
+Before making UI/UX tooling recommendations for Recipe Vault, read docs/UI_UX_FOUNDATION.md and docs/AI_UI_UX_RESOURCE_EVALUATION_PLAYBOOK.md.
+
+Inspect the app first, identify its real UI/UX needs, and decide whether each resource should be Adopted, Adapted, Referenced, or Skipped.
+
+Do not inherit conclusions from other projects. Recommend the smallest useful non-overlapping system for this native SwiftUI recipe app.

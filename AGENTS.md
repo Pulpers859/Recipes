@@ -27,6 +27,14 @@ Recipe Vault is a small SwiftUI + SwiftData iOS app. Optimize for recipe correct
 - Prefer explicit errors and visible guardrails over silent fallback behavior.
 - Be honest about what was validated and what could not be validated.
 
+## UI/UX Foundation
+
+- Read `docs/UI_UX_FOUNDATION.md` before redesigns, visual polish passes, component-system work, or UI/UX resource evaluation.
+- Use `docs/AI_UI_UX_RESOURCE_EVALUATION_PLAYBOOK.md` when external UI/UX resources, component libraries, design systems, or visual reference sites might influence the app.
+- Use `.claude/skills/ui-ux-resource-eval.md` for recurring external UI/UX resource evaluation work.
+- Preserve native SwiftUI behavior and Recipe Vault's warm culinary identity; external web resources are research inputs, not implementation authority.
+- Prefer shared primitives in `Extensions/Theme.swift` (`RVHeroBanner`, `rvCard`, `RVSectionTitle`, `RVStatusBanner`, `RVMetricPill`) before inventing new visual treatments.
+
 ## Architecture Hotspots
 
 - `Views/`: user flows, especially import, review, save, delete, pantry, meal plan, and shopping list flows.

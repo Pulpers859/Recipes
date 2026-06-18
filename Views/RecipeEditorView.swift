@@ -242,8 +242,13 @@ struct RecipeEditorView: View {
                     .lineLimit(3...10)
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(Color.rvBackground.ignoresSafeArea())
+        .tint(Color.rvAccent)
         .navigationTitle(isNewImport ? "Review Import" : (recipe.title.isEmpty ? "New Recipe" : "Edit Recipe"))
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(Color.rvBackground, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button("Cancel") { cancelEditing() }

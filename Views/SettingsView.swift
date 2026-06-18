@@ -29,219 +29,31 @@ struct SettingsView: View {
     
     var body: some View {
         NavigationStack {
-            Form {
-                // MARK: - AI Parsing
-                Section {
-                    HStack {
-                        Image(systemName: "brain.fill")
-                            .foregroundStyle(Color.rvAccent)
-                        VStack(alignment: .leading) {
-                            Text("Claude API Key")
-                                .font(.subheadline.bold())
-                            Text(apiKeyStatusText)
-                                .font(.caption)
-                                .foregroundStyle(apiKey.isEmpty ? Color.rvTaupe : Color.rvPrimary)
-                        }
-                    }
-                    
-                    if showAPIKey {
-                        SecureField("sk-ant-...", text: $tempAPIKey)
-                            .textContentType(.password)
-                            .textInputAutocapitalization(.never)
-                            .font(.system(.body, design: .monospaced))
-                        
-                        HStack {
-                            Button("Save") {
-                                saveAPIKey(tempAPIKey)
-                                showAPIKey = false
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(Color.rvAccent)
-                            .disabled(tempAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                            
-                            Button("Cancel") {
-                                showAPIKey = false
-                                tempAPIKey = apiKey
-                            }
-                            .buttonStyle(.bordered)
-                        }
-                    } else {
-                        Button(apiKey.isEmpty ? "Add API Key" : (apiKeySource == .bundledConfig ? "Override API Key" : "Change API Key")) {
-                            tempAPIKey = apiKey
-                            showAPIKey = true
-                        }
-                        
-                        if apiKeySource == .keychain {
-                            Button("Remove Saved API Key", role: .destructive) {
-                                removeAPIKey()
-                            }
-                        }
-                    }
-                    
-                    Picker("Parse Mode", selection: $parseMode) {
-                        Text("Auto (AI → Manual fallback)").tag("auto")
-                        Text("AI Only").tag("ai")
-                        Text("Manual Only").tag("manual")
-                    }
+            ScrollView {
+                VStack(alignment: .leading, spacing: RVDesign.sectionSpacing) {
+                    RVHeroBanner(
+                        title: "Settings",
+                        subtitle: "Tune imports, protect your library, and keep Recipe Vault reliable.",
+                        systemImage: "gearshape.fill",
+                        metrics: [
+                            ("Recipes", "\(recipes.count)"),
+                            ("Favorites", "\(recipes.filter { $0.isFavorite }.count)")
+                        ]
+                    )
 
-                    Picker("AI Model", selection: $aiModelID) {
-                        Text("Haiku (Fast & Cheap)").tag("claude-haiku-4-5-20251001")
-                        Text("Sonnet (Balanced)").tag("claude-sonnet-4-6")
-                    }
-                } header: {
-                    Text("AI Recipe Parsing")
-                } footer: {
-                    Text("Save a key in-app (stored securely in the iOS Keychain) or provide `ANTHROPIC_API_KEY` via Info.plist/build settings. Never commit a real key to source control. AI parsing sends recipe text to Claude for structured extraction. Manual mode uses local OCR only.")
+                    aiParsingCard
+                    cookingCard
+                    dataCard
+                    maintenanceCard
+                    analyticsCard
+                    libraryCard
+                    aboutCard
                 }
-                
-                // MARK: - Cooking
-                Section("Cooking Mode") {
-                    Toggle("Keep Screen Awake", isOn: $keepScreenAwake)
-                    Stepper("Default Servings: \(defaultServings)", value: $defaultServings, in: 1...20)
-                }
-                
-                // MARK: - Data Management
-                Section {
-                    Button {
-                        exportJSON()
-                    } label: {
-                        HStack {
-                            Label("Export as JSON Backup", systemImage: "arrow.up.doc.fill")
-                            Spacer()
-                            Text("\(recipes.count) recipes")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .disabled(recipes.isEmpty)
-                    
-                    Button {
-                        exportPDFCookbook()
-                    } label: {
-                        Label("Export as PDF Cookbook", systemImage: "book.closed.fill")
-                    }
-                    .disabled(recipes.isEmpty)
-                    
-                    Button {
-                        showImportPicker = true
-                    } label: {
-                        Label("Import from JSON Backup", systemImage: "arrow.down.doc.fill")
-                    }
-
-                    Button {
-                        importFromClipboardJSON()
-                    } label: {
-                        Label("Import JSON from Clipboard", systemImage: "doc.on.clipboard")
-                    }
-                    
-                    if let message = exportMessage {
-                        Text(message)
-                            .font(.caption)
-                            .foregroundStyle(Color.rvPrimary)
-                    }
-                    
-                    if let result = importResult {
-                        Text(result)
-                            .font(.caption)
-                            .foregroundStyle(Color.rvPrimary)
-                    }
-                } header: {
-                    Text("Data")
-                } footer: {
-                    Text("JSON backups include all recipe data and can be restored later. PDF export creates a printable cookbook with table of contents.")
-                }
-                
-                // MARK: - Maintenance
-                Section {
-                    Button {
-                        resolveConflicts()
-                    } label: {
-                        Label("Resolve Duplicate Recipes", systemImage: "arrow.triangle.merge")
-                    }
-
-                    if let syncResult {
-                        Text(syncResult)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Button(role: .destructive) {
-                        showDeleteAllConfirm = true
-                    } label: {
-                        Label("Delete All Recipes", systemImage: "trash.fill")
-                    }
-                    .disabled(recipes.isEmpty)
-                } header: {
-                    Text("Maintenance")
-                }
-                
-                // MARK: - Analytics
-                Section {
-                    Toggle("Enable anonymous usage analytics", isOn: Binding(
-                        get: { analyticsEnabled },
-                        set: { newValue in
-                            analyticsEnabled = newValue
-                            AnalyticsService.shared.setAnalyticsEnabled(newValue)
-                        }
-                    ))
-                    
-                    if let lastCrash = AnalyticsService.shared.lastAbnormalShutdownDate() {
-                        HStack {
-                            Text("Last abnormal shutdown")
-                            Spacer()
-                            Text(lastCrash.formatted(date: .abbreviated, time: .shortened))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    } else {
-                        HStack {
-                            Text("Last abnormal shutdown")
-                            Spacer()
-                            Text("None detected")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                } header: {
-                    Text("Analytics")
-                } footer: {
-                    Text("Analytics are stored locally and used to improve reliability in future updates.")
-                }
-                
-                // MARK: - Stats
-                Section("Your Library") {
-                    StatRow(label: "Total Recipes", value: "\(recipes.count)")
-                    StatRow(label: "Favorites", value: "\(recipes.filter { $0.isFavorite }.count)")
-                    StatRow(label: "Total Times Cooked", value: "\(recipes.reduce(0) { $0 + $1.timesCooked })")
-                    
-                    let categories = Set(recipes.map { $0.category })
-                    StatRow(label: "Categories Used", value: "\(categories.count)")
-                    
-                    if let mostCooked = recipes.max(by: { $0.timesCooked < $1.timesCooked }), mostCooked.timesCooked > 0 {
-                        StatRow(label: "Most Cooked", value: "\(mostCooked.title) (\(mostCooked.timesCooked)x)")
-                    }
-                }
-                
-                // MARK: - About
-                Section("About") {
-                    HStack {
-                        Text("Version")
-                        Spacer()
-                        Text("1.0.0")
-                            .foregroundStyle(.secondary)
-                    }
-                    HStack {
-                        Text("Recipe Vault")
-                        Spacer()
-                        Text("Built with SwiftUI + Claude")
-                            .foregroundStyle(.secondary)
-                            .font(.caption)
-                    }
-                }
+                .padding(RVDesign.screenPadding)
+                .padding(.bottom, 28)
             }
-            .scrollContentBackground(.hidden)
             .background(Color.rvBackground.ignoresSafeArea())
-            .navigationTitle("Settings")
+            .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(Color.rvBackground, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
@@ -270,6 +82,240 @@ struct SettingsView: View {
                 Text("This will permanently delete all \(recipes.count) recipe(s). A safety backup will be saved on this device first.")
             }
         }
+    }
+
+    private var aiParsingCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            RVSectionTitle(
+                title: "AI Recipe Parsing",
+                subtitle: "Better extraction for messy PDFs, screenshots, and recipe pages."
+            )
+
+            HStack(spacing: 12) {
+                Image(systemName: "brain.fill")
+                    .foregroundStyle(Color.rvAccent)
+                    .frame(width: 32)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Claude API Key")
+                        .font(.headline)
+                        .foregroundStyle(Color.rvInk)
+                    Text(apiKeyStatusText)
+                        .font(.caption)
+                        .foregroundStyle(apiKey.isEmpty ? Color.rvTaupe : Color.rvPrimary)
+                }
+
+                Spacer()
+            }
+
+            if showAPIKey {
+                SecureField("sk-ant-...", text: $tempAPIKey)
+                    .textContentType(.password)
+                    .textInputAutocapitalization(.never)
+                    .font(.system(.body, design: .monospaced))
+                    .rvInsetField()
+
+                HStack(spacing: 10) {
+                    Button {
+                        saveAPIKey(tempAPIKey)
+                        showAPIKey = false
+                    } label: {
+                        Label("Save Key", systemImage: "checkmark.circle.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color.rvAccent)
+                    .disabled(tempAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                    Button("Cancel") {
+                        showAPIKey = false
+                        tempAPIKey = apiKey
+                    }
+                    .buttonStyle(.bordered)
+                }
+            } else {
+                Button(apiKey.isEmpty ? "Add API Key" : (apiKeySource == .bundledConfig ? "Override API Key" : "Change API Key")) {
+                    tempAPIKey = apiKey
+                    showAPIKey = true
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Color.rvAccent)
+
+                if apiKeySource == .keychain {
+                    Button("Remove Saved API Key", role: .destructive) {
+                        removeAPIKey()
+                    }
+                    .font(.subheadline.weight(.semibold))
+                }
+            }
+
+            Picker("Parse Mode", selection: $parseMode) {
+                Text("Auto").tag("auto")
+                Text("AI Only").tag("ai")
+                Text("Manual").tag("manual")
+            }
+            .pickerStyle(.segmented)
+
+            Picker("AI Model", selection: $aiModelID) {
+                Text("Haiku (Fast & Cheap)").tag("claude-haiku-4-5-20251001")
+                Text("Sonnet (Balanced)").tag("claude-sonnet-4-6")
+            }
+
+            RVStatusBanner(
+                message: "Keys are stored in the iOS Keychain or supplied by build settings. Never commit a real key to source control.",
+                tone: .info
+            )
+        }
+        .rvCard()
+    }
+
+    private var cookingCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            RVSectionTitle(title: "Cooking Mode", subtitle: "Defaults for the kitchen workflow.")
+            Toggle("Keep Screen Awake", isOn: $keepScreenAwake)
+                .tint(Color.rvAccent)
+            Stepper("Default Servings: \(defaultServings)", value: $defaultServings, in: 1...20)
+        }
+        .rvCard()
+    }
+
+    private var dataCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            RVSectionTitle(
+                title: "Data",
+                subtitle: "Back up the vault, make a cookbook, or restore from JSON."
+            )
+
+            settingsAction("Export JSON Backup", systemImage: "arrow.up.doc.fill", trailing: "\(recipes.count) recipes", disabled: recipes.isEmpty) {
+                exportJSON()
+            }
+
+            settingsAction("Export PDF Cookbook", systemImage: "book.closed.fill", disabled: recipes.isEmpty) {
+                exportPDFCookbook()
+            }
+
+            settingsAction("Import JSON Backup", systemImage: "arrow.down.doc.fill") {
+                showImportPicker = true
+            }
+
+            settingsAction("Import JSON from Clipboard", systemImage: "doc.on.clipboard") {
+                importFromClipboardJSON()
+            }
+
+            if let message = exportMessage {
+                RVStatusBanner(message: message, tone: message.lowercased().contains("failed") ? .danger : .success)
+            }
+
+            if let result = importResult {
+                RVStatusBanner(message: result, tone: result.lowercased().contains("failed") ? .danger : .success)
+            }
+        }
+        .rvCard()
+    }
+
+    private var maintenanceCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            RVSectionTitle(
+                title: "Maintenance",
+                subtitle: "Repair duplicate imports and handle destructive cleanup with a backup-first posture."
+            )
+
+            settingsAction("Resolve Duplicate Recipes", systemImage: "arrow.triangle.merge") {
+                resolveConflicts()
+            }
+
+            if let syncResult {
+                RVStatusBanner(message: syncResult, tone: .info)
+            }
+
+            Button(role: .destructive) {
+                showDeleteAllConfirm = true
+            } label: {
+                Label("Delete All Recipes", systemImage: "trash.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .background(Color.red.opacity(0.10), in: RoundedRectangle(cornerRadius: RVDesign.controlRadius, style: .continuous))
+            }
+            .disabled(recipes.isEmpty)
+        }
+        .rvCard()
+    }
+
+    private var analyticsCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            RVSectionTitle(title: "Reliability", subtitle: "Local diagnostics for improving app stability.")
+
+            Toggle("Enable anonymous usage analytics", isOn: Binding(
+                get: { analyticsEnabled },
+                set: { newValue in
+                    analyticsEnabled = newValue
+                    AnalyticsService.shared.setAnalyticsEnabled(newValue)
+                }
+            ))
+            .tint(Color.rvAccent)
+
+            if let lastCrash = AnalyticsService.shared.lastAbnormalShutdownDate() {
+                StatRow(label: "Last abnormal shutdown", value: lastCrash.formatted(date: .abbreviated, time: .shortened))
+            } else {
+                StatRow(label: "Last abnormal shutdown", value: "None detected")
+            }
+        }
+        .rvCard()
+    }
+
+    private var libraryCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            RVSectionTitle(title: "Your Library")
+            StatRow(label: "Total Recipes", value: "\(recipes.count)")
+            StatRow(label: "Favorites", value: "\(recipes.filter { $0.isFavorite }.count)")
+            StatRow(label: "Total Times Cooked", value: "\(recipes.reduce(0) { $0 + $1.timesCooked })")
+
+            let categories = Set(recipes.map { $0.category })
+            StatRow(label: "Categories Used", value: "\(categories.count)")
+
+            if let mostCooked = recipes.max(by: { $0.timesCooked < $1.timesCooked }), mostCooked.timesCooked > 0 {
+                StatRow(label: "Most Cooked", value: "\(mostCooked.title) (\(mostCooked.timesCooked)x)")
+            }
+        }
+        .rvCard()
+    }
+
+    private var aboutCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            RVSectionTitle(title: "About")
+            StatRow(label: "Version", value: "1.0.0")
+            StatRow(label: "Recipe Vault", value: "SwiftUI + Claude")
+        }
+        .rvCard()
+    }
+
+    private func settingsAction(
+        _ title: String,
+        systemImage: String,
+        trailing: String? = nil,
+        disabled: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Label(title, systemImage: systemImage)
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                if let trailing {
+                    Text(trailing)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Color.rvSubtleText)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(Color.rvSurface, in: RoundedRectangle(cornerRadius: RVDesign.controlRadius, style: .continuous))
+            .foregroundStyle(Color.rvInk)
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .opacity(disabled ? 0.48 : 1)
     }
     
     // MARK: - Export JSON

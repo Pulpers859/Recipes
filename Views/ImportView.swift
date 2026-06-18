@@ -38,71 +38,40 @@ struct ImportView: View {
     
     var body: some View {
         NavigationStack {
-            VStack(spacing: 20) {
-                // Tab picker
-                Picker("Import Method", selection: $selectedTab) {
-                    ForEach(ImportTab.allCases, id: \.self) { tab in
-                        Label(tab.rawValue, systemImage: tab.icon).tag(tab)
+            ScrollView {
+                VStack(alignment: .leading, spacing: RVDesign.sectionSpacing) {
+                    RVHeroBanner(
+                        title: "Import Recipe",
+                        subtitle: "Bring in a PDF, photo, or recipe link, then review the result before it joins your vault.",
+                        systemImage: "square.and.arrow.down.fill",
+                        metrics: [
+                            ("Mode", parseModeLabel),
+                            ("AI", parser.hasAPIKey ? "Ready" : "Off")
+                        ]
+                    )
+
+                    importMethodPicker
+
+                    selectedImportPanel
+
+                    if parser.isProcessing {
+                        processingCard
                     }
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal)
-                
-                // Content
-                switch selectedTab {
-                case .pdf:
-                    pdfImportView
-                case .photo:
-                    photoImportView
-                case .url:
-                    urlImportView
-                }
-                
-                // Progress indicator
-                if parser.isProcessing {
-                    VStack(spacing: 12) {
-                        ProgressView()
-                            .scaleEffect(1.2)
-                        Text(parser.parseProgress)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+
+                    if let error = parser.lastError {
+                        RVStatusBanner(message: error, tone: .danger)
                     }
-                    .padding()
+
+                    parsingStatusCard
                 }
-                
-                if let error = parser.lastError {
-                    Text(error)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                        .padding(.horizontal)
-                }
-                
-                Spacer()
-                
-                // Parse mode toggle
-                VStack(spacing: 8) {
-                    HStack {
-                        Image(systemName: parser.hasAPIKey ? "brain.fill" : "brain")
-                            .foregroundStyle(parser.hasAPIKey ? .green : .gray)
-                        Text(parser.hasAPIKey ? "AI Parsing Enabled" : "AI Parsing Unavailable")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    
-                    if !parser.hasAPIKey {
-                        // Be honest about fallback quality: the local parser
-                        // is heuristic and routinely needs hand-cleanup.
-                        Text("Without an API key, imports use a basic local parser — ingredient amounts and steps usually need manual cleanup afterward. Add a Claude API key in Settings for accurate extraction.")
-                            .font(.caption2)
-                            .foregroundStyle(.orange)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal)
-                    }
-                }
-                .padding()
+                .padding(RVDesign.screenPadding)
+                .padding(.bottom, 28)
             }
-            .navigationTitle("Import Recipe")
+            .background(Color.rvBackground.ignoresSafeArea())
+            .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(Color.rvBackground, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -130,131 +99,227 @@ struct ImportView: View {
             }
         }
     }
+
+    private var importMethodPicker: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            RVSectionTitle(
+                title: "Choose Source",
+                subtitle: "Use the cleanest source available. Structured web recipes are fastest; photos and PDFs need careful review."
+            )
+
+            Picker("Import Method", selection: $selectedTab) {
+                ForEach(ImportTab.allCases, id: \.self) { tab in
+                    Label(tab.rawValue, systemImage: tab.icon).tag(tab)
+                }
+            }
+            .pickerStyle(.segmented)
+        }
+        .rvCard()
+    }
+
+    @ViewBuilder
+    private var selectedImportPanel: some View {
+        switch selectedTab {
+        case .pdf:
+            pdfImportView
+        case .photo:
+            photoImportView
+        case .url:
+            urlImportView
+        }
+    }
+
+    private var processingCard: some View {
+        HStack(spacing: 14) {
+            ProgressView()
+                .tint(Color.rvAccent)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Working on it")
+                    .font(.headline)
+                    .foregroundStyle(Color.rvInk)
+                Text(parser.parseProgress)
+                    .font(.caption)
+                    .foregroundStyle(Color.rvSubtleText)
+            }
+        }
+        .rvCard()
+    }
+
+    private var parsingStatusCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: parser.hasAPIKey ? "brain.fill" : "brain")
+                    .foregroundStyle(parser.hasAPIKey ? Color.rvPrimary : Color.rvMuted)
+                Text(parser.hasAPIKey ? "AI parsing enabled" : "AI parsing unavailable")
+                    .font(.headline)
+                    .foregroundStyle(Color.rvInk)
+            }
+
+            if parser.hasAPIKey {
+                Text("Recipe Vault can use Claude to extract structured ingredients, steps, timing, and sections. You still get the final review.")
+                    .font(.caption)
+                    .foregroundStyle(Color.rvSubtleText)
+            } else {
+                RVStatusBanner(
+                    message: "Without an API key, imports use a basic local parser. Ingredient amounts and steps usually need cleanup afterward.",
+                    tone: .warning
+                )
+            }
+        }
+        .rvCard()
+    }
+
+    private var parseModeLabel: String {
+        switch parseModeSetting {
+        case "ai": return "AI"
+        case "manual": return "Manual"
+        default: return "Auto"
+        }
+    }
     
     // MARK: - PDF Import
     
     private var pdfImportView: some View {
-        VStack(spacing: 16) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 20)
-                    .strokeBorder(style: StrokeStyle(lineWidth: 2, dash: [8]))
-                    .foregroundStyle(Color.rvAccent.opacity(0.5))
-                    .frame(height: 200)
-                
-                VStack(spacing: 12) {
-                    Image(systemName: "doc.badge.arrow.up.fill")
-                        .font(.system(size: 48))
-                        .foregroundStyle(Color.rvAccent)
-                    
-                    Text("Tap to select a PDF")
-                        .font(.headline)
-                    
-                    Text("Recipe will be extracted automatically")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+        VStack(alignment: .leading, spacing: 16) {
+            RVSectionTitle(
+                title: "PDF Cookbook",
+                subtitle: "Best for saved recipes and cookbook pages. Multi-recipe PDFs are split automatically, then flagged for review."
+            )
+
+            Button {
+                showFilePicker = true
+            } label: {
+                importDropZone(
+                    icon: "doc.badge.arrow.up.fill",
+                    title: "Select PDF",
+                    subtitle: "Up to 25 MB"
+                )
             }
-            .onTapGesture { showFilePicker = true }
-            .padding(.horizontal)
+            .buttonStyle(.plain)
         }
+        .rvCard()
     }
     
     // MARK: - Photo Import
     
     private var photoImportView: some View {
-        VStack(spacing: 16) {
+        VStack(alignment: .leading, spacing: 16) {
+            RVSectionTitle(
+                title: "Photo or Screenshot",
+                subtitle: "Great for recipe cards and saved screenshots. Keep the photo sharp, well lit, and uncropped."
+            )
+
             PhotosPicker(
                 selection: $selectedPhotoItem,
                 matching: .images
             ) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 20)
-                        .strokeBorder(style: StrokeStyle(lineWidth: 2, dash: [8]))
-                        .foregroundStyle(Color.rvAccent.opacity(0.5))
-                        .frame(height: 200)
-                    
-                    VStack(spacing: 12) {
-                        Image(systemName: "camera.fill")
-                            .font(.system(size: 48))
-                            .foregroundStyle(Color.rvAccent)
-                        
-                        Text("Select a Photo")
-                            .font(.headline)
-                        
-                        Text("Recipe card, screenshot, or cookbook page")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
+                importDropZone(
+                    icon: "camera.fill",
+                    title: "Select Photo",
+                    subtitle: "Recipe card, screenshot, or cookbook page"
+                )
             }
-            .padding(.horizontal)
             .onChange(of: selectedPhotoItem) { _, newItem in
                 handlePhotoSelection(newItem)
             }
         }
+        .rvCard()
     }
     
     // MARK: - URL Import
     
     private var urlImportView: some View {
-        VStack(spacing: 16) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Recipe URL")
-                    .font(.headline)
-                
-                HStack {
-                    TextField("https://example.com/recipe", text: $urlText)
-                        .textFieldStyle(.roundedBorder)
-                        .textContentType(.URL)
-                        .autocapitalization(.none)
-                    
-                    Button("Import") {
-                        Task {
-                            scraper.lastError = nil
-                            do {
-                                let recipe = try await scraper.scrapeRecipe(
-                                    from: urlText,
-                                    allowAI: parseModeSetting != "manual"
-                                )
-                                modelContext.insert(recipe)
-                                AnalyticsService.shared.track("import_url_success", metadata: [
-                                    "mode": parseModeSetting
-                                ])
-                                importedRecipe = recipe
-                                urlText = ""
-                            } catch {
-                                scraper.lastError = error.localizedDescription
-                                AnalyticsService.shared.track("import_url_failed")
-                            }
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Color.rvAccent)
-                    .disabled(urlText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || scraper.isLoading)
+        VStack(alignment: .leading, spacing: 16) {
+            RVSectionTitle(
+                title: "Recipe Link",
+                subtitle: "Paste a recipe page. Sites with structured recipe data import fastest and most accurately."
+            )
+
+            HStack(spacing: 12) {
+                TextField("https://example.com/recipe", text: $urlText)
+                    .textContentType(.URL)
+                    .keyboardType(.URL)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .rvInsetField()
+
+                Button {
+                    importURL()
+                } label: {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(.white)
+                        .frame(width: 48, height: 48)
+                        .background(LinearGradient.rvAccentGradient, in: Circle())
                 }
+                .buttonStyle(.plain)
+                .disabled(urlText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || scraper.isLoading)
             }
-            .padding(.horizontal)
-            
+
             if scraper.isLoading {
                 HStack(spacing: 8) {
                     ProgressView()
                     Text(scraper.statusMessage)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.rvSubtleText)
                 }
             }
-            
+
             if let error = scraper.lastError {
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .padding(.horizontal)
+                RVStatusBanner(message: error, tone: .danger)
             }
-            
-            Text("Paste a link to any recipe page. Works best with sites that use structured recipe data (JSON-LD). Falls back to AI extraction if available.")
+
+            RVStatusBanner(
+                message: "Local and private-network URLs are blocked for safety. You will review the recipe before keeping it.",
+                tone: .info
+            )
+        }
+        .rvCard()
+    }
+
+    private func importDropZone(icon: String, title: String, subtitle: String) -> some View {
+        VStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 44, weight: .semibold))
+                .foregroundStyle(LinearGradient.rvAccentGradient)
+
+            Text(title)
+                .font(.headline)
+                .foregroundStyle(Color.rvInk)
+
+            Text(subtitle)
                 .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal)
+                .foregroundStyle(Color.rvSubtleText)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(minHeight: 186)
+        .background(Color.rvSurface.opacity(0.82), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .strokeBorder(Color.rvAccent.opacity(0.35), style: StrokeStyle(lineWidth: 1.5, dash: [7, 7]))
+        }
+    }
+
+    private func importURL() {
+        Task {
+            scraper.lastError = nil
+            do {
+                let recipe = try await scraper.scrapeRecipe(
+                    from: urlText,
+                    allowAI: parseModeSetting != "manual"
+                )
+                modelContext.insert(recipe)
+                AnalyticsService.shared.track("import_url_success", metadata: [
+                    "mode": parseModeSetting
+                ])
+                importedRecipe = recipe
+                urlText = ""
+            } catch {
+                scraper.lastError = error.localizedDescription
+                AnalyticsService.shared.track("import_url_failed")
+            }
         }
     }
     

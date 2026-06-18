@@ -37,6 +37,8 @@ Recipe Vault is a small SwiftUI + SwiftData iOS app. Optimize for recipe correct
 - When touching models or persistence, trace every read/write edge before editing.
 - Preserve backup compatibility unless the user explicitly asks for a breaking migration.
 - Prefer explicit errors and visible guardrails over silent fallback behavior.
+- For UI/UX redesigns or visual polish passes, read `docs/UI_UX_FOUNDATION.md` first and use shared primitives from `Extensions/Theme.swift`.
+- For external UI/UX resources, use `docs/AI_UI_UX_RESOURCE_EVALUATION_PLAYBOOK.md`; adapt or reference resources rather than copying web patterns into SwiftUI.
 - If local validation is limited, say exactly what remains unverified.
 
 ## Project Playbooks
