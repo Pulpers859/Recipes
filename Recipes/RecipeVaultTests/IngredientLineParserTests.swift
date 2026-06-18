@@ -1,5 +1,5 @@
 import XCTest
-@testable import RecipeVault
+@testable import Recipes
 
 final class IngredientLineParserTests: XCTestCase {
 
