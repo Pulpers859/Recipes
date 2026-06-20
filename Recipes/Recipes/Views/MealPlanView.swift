@@ -401,7 +401,10 @@ struct MealPlanView: View {
             mealSlot: slot,
             servings: recipe.servings
         )
-        plan.entries.append(entry)
+        // Reassign rather than mutate in place — MealPlanningService documents
+        // that SwiftData doesn't reliably track in-place edits to this value
+        // array, and this keeps the view consistent with that rule.
+        plan.entries = plan.entries + [entry]
         guard saveChanges(failureMessage: "Could not add this meal to your plan") else { return }
 
         AnalyticsService.shared.track("meal_plan_entry_added", metadata: [
@@ -412,7 +415,7 @@ struct MealPlanView: View {
 
     private func removeEntry(_ entry: MealPlanEntry) {
         guard let plan = currentPlan else { return }
-        plan.entries.removeAll { $0.id == entry.id }
+        plan.entries = plan.entries.filter { $0.id != entry.id }
         guard saveChanges(failureMessage: "Could not remove this meal from your plan") else { return }
     }
 
