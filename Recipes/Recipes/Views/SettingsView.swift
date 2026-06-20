@@ -25,8 +25,6 @@ struct SettingsView: View {
     @State private var showDeleteAllConfirm = false
     @State private var apiKeySource: APIKeyStore.KeySource?
 
-    private let maxBackupImportBytes = 50 * 1024 * 1024
-    
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -363,22 +361,30 @@ struct SettingsView: View {
     private func importFromPickedFile(url: URL) {
         do {
             let data = try loadImportData(from: url)
-            try importBackupData(data)
+            importResult = try RecipeLibraryMaintenance.importBackup(
+                data: data,
+                existingRecipes: recipes,
+                modelContext: modelContext
+            )
         } catch {
             importResult = "Import failed: \(error.localizedDescription)"
             AnalyticsService.shared.track("backup_import_json_failed")
         }
     }
-    
+
     private func importFromClipboardJSON() {
         guard let clipboardText = UIPasteboard.general.string,
               let data = clipboardText.data(using: .utf8) else {
             importResult = "Clipboard does not contain JSON text."
             return
         }
-        
+
         do {
-            try importBackupData(data)
+            importResult = try RecipeLibraryMaintenance.importBackup(
+                data: data,
+                existingRecipes: recipes,
+                modelContext: modelContext
+            )
         } catch {
             importResult = "Import failed: \(error.localizedDescription)"
             AnalyticsService.shared.track("backup_import_json_failed")
@@ -423,65 +429,6 @@ struct SettingsView: View {
             code: 1,
             userInfo: [NSLocalizedDescriptionKey: "Could not access selected file."]
         )
-    }
-    
-    private func importBackupData(_ data: Data) throws {
-        guard data.count <= maxBackupImportBytes else {
-            throw NSError(
-                domain: "RecipeVault.Import",
-                code: 2,
-                userInfo: [NSLocalizedDescriptionKey: "Backup file is larger than 50 MB."]
-            )
-        }
-        
-        // Validate it looks like JSON before decoding into recipes.
-        do {
-            _ = try JSONSerialization.jsonObject(with: data)
-        } catch {
-            throw NSError(
-                domain: "RecipeVault.Import",
-                code: 3,
-                userInfo: [NSLocalizedDescriptionKey: "Selected file is not valid JSON."]
-            )
-        }
-        
-        let imported = try RecipeExportService.importFromJSON(data: data)
-        var existingFingerprints = Set(recipes.map(recipeFingerprint))
-        var insertedCount = 0
-        var skippedCount = 0
-        
-        for recipe in imported {
-            let fingerprint = recipeFingerprint(recipe)
-            if existingFingerprints.contains(fingerprint) {
-                skippedCount += 1
-                continue
-            }
-            modelContext.insert(recipe)
-            existingFingerprints.insert(fingerprint)
-            insertedCount += 1
-        }
-
-        do {
-            try modelContext.save()
-        } catch {
-            modelContext.rollback()
-            throw NSError(
-                domain: "RecipeVault.Import",
-                code: 4,
-                userInfo: [NSLocalizedDescriptionKey: "Recipes were decoded, but could not be saved: \(error.localizedDescription)"]
-            )
-        }
-        
-        if skippedCount > 0 {
-            importResult = "Imported \(insertedCount) recipes (\(skippedCount) duplicates skipped)."
-        } else {
-            importResult = "Imported \(insertedCount) recipes successfully!"
-        }
-        
-        AnalyticsService.shared.track("backup_import_json", metadata: [
-            "inserted": "\(insertedCount)",
-            "skipped": "\(skippedCount)"
-        ])
     }
     
     // MARK: - API Key Storage
@@ -530,86 +477,16 @@ struct SettingsView: View {
         }
     }
     
-    private func recipeFingerprint(_ recipe: Recipe) -> String {
-        let title = recipe.title
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-        let ingredientNames = recipe.normalizedIngredients
-            .map { $0.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
-            .sorted()
-            .joined(separator: "|")
-        return "\(title)::\(ingredientNames)"
-    }
-    
     private func deleteAllRecipes() {
-        let count = recipes.count
-        guard count > 0 else { return }
-
-        // Write a safety backup first so this destructive action is recoverable
-        // via "Import from JSON Backup".
-        do {
-            try RecipeExportService.writeAutomaticBackup(recipes: recipes)
-        } catch {
-            importResult = "Nothing was deleted because the safety backup could not be written."
-            AnalyticsService.shared.track("recipes_delete_all_backup_failed")
-            return
+        if let message = RecipeLibraryMaintenance.deleteAllRecipes(recipes, modelContext: modelContext) {
+            importResult = message
         }
-
-        // Meal-plan entries for deleted recipes would linger in the plan UI
-        // but silently drop out of shopping-list generation.
-        do {
-            try MealPlanningService.removeEntries(
-                forRecipeIDs: Set(recipes.map { $0.id }),
-                modelContext: modelContext
-            )
-        } catch {
-            modelContext.rollback()
-            importResult = "Nothing was deleted because meal plan cleanup could not be saved: \(error.localizedDescription)"
-            AnalyticsService.shared.track("recipes_delete_all_plan_cleanup_failed")
-            return
-        }
-
-        for recipe in recipes {
-            modelContext.delete(recipe)
-        }
-
-        do {
-            try modelContext.save()
-        } catch {
-            modelContext.rollback()
-            importResult = "The recipes were not deleted because the change could not be saved: \(error.localizedDescription)"
-            AnalyticsService.shared.track("recipes_delete_all_save_failed")
-            return
-        }
-
-        SpotlightIndexingService.shared.removeAllRecipes()
-
-        importResult = "Deleted \(count) recipes. A safety backup was saved on this device."
-        AnalyticsService.shared.track("recipes_all_deleted", metadata: ["count": "\(count)"])
     }
 
     private func resolveConflicts() {
-        let result = RecipeConflictResolverService.resolveRecipeConflicts(recipes: recipes, modelContext: modelContext)
-        do {
-            try modelContext.save()
-        } catch {
-            modelContext.rollback()
-            syncResult = "Duplicate cleanup could not be saved: \(error.localizedDescription)"
-            AnalyticsService.shared.track("resolve_recipe_conflicts_save_failed")
-            return
-        }
-
-        if result.deletedDuplicates == 0 {
-            syncResult = "No duplicate recipe conflicts found."
-        } else {
-            syncResult = "Resolved \(result.mergedRecipes) conflict group(s), removed \(result.deletedDuplicates) duplicate recipes."
-        }
-        AnalyticsService.shared.track("resolve_recipe_conflicts", metadata: [
-            "merged_groups": "\(result.mergedRecipes)",
-            "deleted_duplicates": "\(result.deletedDuplicates)"
-        ])
+        syncResult = RecipeLibraryMaintenance.resolveConflicts(recipes, modelContext: modelContext)
     }
-    
+
 }
 
 // MARK: - Stat Row
