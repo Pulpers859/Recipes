@@ -72,7 +72,10 @@ struct AIParsedRecipe: Decodable {
                 RecipeStep(
                     order: index + 1,
                     instruction: step.instruction,
-                    timerSeconds: step.timerSeconds.map { max($0, 0) },
+                    // Clamp to a generous ceiling (7 days) so a hallucinated
+                    // timer can't schedule an absurd countdown/notification,
+                    // while still allowing long fermentation/brining steps.
+                    timerSeconds: step.timerSeconds.map { min(max($0, 0), 604_800) },
                     timerLabel: step.timerLabel
                 )
             }
@@ -82,9 +85,11 @@ struct AIParsedRecipe: Decodable {
             summary: summary,
             ingredients: normalizedIngredients,
             steps: normalizedSteps,
-            servings: max(servings ?? 4, 1),
-            prepTime: max(prepTime ?? 0, 0),
-            cookTime: max(cookTime ?? 0, 0),
+            // Upper-bound servings/times too: AI output is the least-trusted
+            // input, and an absurd value would scale ingredients into nonsense.
+            servings: min(max(servings ?? 4, 1), 1000),
+            prepTime: min(max(prepTime ?? 0, 0), 100_000),
+            cookTime: min(max(cookTime ?? 0, 0), 100_000),
             category: RecipeCategory(rawValue: category ?? "") ?? .other,
             tags: tags ?? [],
             cuisine: cuisine ?? "",

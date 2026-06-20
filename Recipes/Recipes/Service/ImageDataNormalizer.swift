@@ -24,6 +24,12 @@ enum ImageDataNormalizer {
             image.draw(in: CGRect(origin: .zero, size: targetSize))
         }
 
-        return resized.jpegData(compressionQuality: compressionQuality) ?? data
+        guard let resizedData = resized.jpegData(compressionQuality: compressionQuality) else {
+            return data
+        }
+        // When nothing was downscaled (image already within maxDimension),
+        // re-encoding can produce a LARGER file and double-compresses an
+        // existing JPEG. Never return something bigger than the original.
+        return resizedData.count < data.count ? resizedData : data
     }
 }

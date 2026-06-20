@@ -19,7 +19,14 @@ struct RecipePhotoViewer: View {
             }
             .tabViewStyle(.page(indexDisplayMode: photoData.count > 1 ? .automatic : .never))
             .ignoresSafeArea(edges: .bottom)
-            
+            .onAppear {
+                // Guard against a stale binding value pointing past the end of
+                // the array (e.g. photos removed before reopening the viewer).
+                if selectedIndex >= photoData.count {
+                    selectedIndex = max(0, photoData.count - 1)
+                }
+            }
+
             VStack {
                 HStack(spacing: 12) {
                     if photoData.count > 1 {

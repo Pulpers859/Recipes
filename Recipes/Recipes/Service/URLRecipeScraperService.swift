@@ -232,7 +232,7 @@ class URLRecipeScraperService: ObservableObject {
             summary: cleanHTMLEntities(summary),
             ingredients: ingredients,
             steps: steps,
-            servings: servings,
+            servings: min(max(servings, 1), 1000),
             prepTime: prepTime,
             cookTime: cookTime,
             category: category,
@@ -323,7 +323,15 @@ class URLRecipeScraperService: ObservableObject {
         let requestBody: [String: Any] = [
             "model": modelID,
             "max_tokens": 4000,
-            "system": systemPrompt,
+            // Array form with ephemeral cache_control so the static system
+            // prompt is prompt-cached across imports, matching the PDF parser.
+            "system": [
+                [
+                    "type": "text",
+                    "text": systemPrompt,
+                    "cache_control": ["type": "ephemeral"]
+                ]
+            ],
             "messages": [
                 ["role": "user", "content": "Extract the recipe:\n\n\(truncated)"]
             ]

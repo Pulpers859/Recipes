@@ -214,6 +214,14 @@ struct RecipeDetailView: View {
                 }
             }
             .shadow(color: .black.opacity(0.08), radius: 18, y: 10)
+            // Keep the paged selection valid if photos are removed while the
+            // detail view is open, so the "N/M" counter can't read "3/2" and
+            // the viewer can't open on a stale index.
+            .onChange(of: recipe.photoData.count) { _, count in
+                if selectedPhotoIndex >= count {
+                    selectedPhotoIndex = max(0, count - 1)
+                }
+            }
         }
     }
 

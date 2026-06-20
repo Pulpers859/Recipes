@@ -10,14 +10,23 @@ class SpotlightIndexingService {
     static let shared = SpotlightIndexingService()
     private let domainID = "com.recipevault.recipes"
     private var hasCompletedLaunchIndex = false
+    private let launchIndexLock = NSLock()
 
     /// One full reindex per launch is enough: saves call indexRecipe and
     /// deletes call removeRecipe, so the index stays in sync incrementally.
     /// Previously the whole library was reindexed on every Recipes-tab
     /// appearance, which is wasted work that grows with the library.
     func indexAllRecipesIfNeeded(_ recipes: [Recipe]) {
-        guard !hasCompletedLaunchIndex else { return }
+        // Check-and-set under a lock so two near-simultaneous tab appearances
+        // can't both pass the guard and kick off a duplicate full reindex.
+        launchIndexLock.lock()
+        if hasCompletedLaunchIndex {
+            launchIndexLock.unlock()
+            return
+        }
         hasCompletedLaunchIndex = true
+        launchIndexLock.unlock()
+
         indexAllRecipes(recipes)
     }
 

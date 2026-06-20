@@ -144,8 +144,10 @@ struct RecipeShareView: View {
         }
         
         text += "\n👨‍🍳 INSTRUCTIONS\n"
-        for step in recipe.steps.sorted(by: { $0.order < $1.order }) {
-            text += "\(step.order). \(step.instruction)\n"
+        // Number sequentially (1,2,3…) like the on-screen card, rather than
+        // echoing raw `order` values which can be non-contiguous after edits.
+        for (idx, step) in recipe.steps.sorted(by: { $0.order < $1.order }).enumerated() {
+            text += "\(idx + 1). \(step.instruction)\n"
         }
         
         if !recipe.notes.isEmpty {
