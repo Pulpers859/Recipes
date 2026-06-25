@@ -41,12 +41,24 @@ Recipe Vault is a small SwiftUI + SwiftData iOS app. Optimize for recipe correct
 - For external UI/UX resources, use `docs/AI_UI_UX_RESOURCE_EVALUATION_PLAYBOOK.md`; adapt or reference resources rather than copying web patterns into SwiftUI.
 - If local validation is limited, say exactly what remains unverified.
 
+## Skill-First Workflow
+
+- At the start of a fresh Recipe Vault session, use `@.claude/skills/recipe-handoff/SKILL.md` unless the task is already deep in one known file.
+- For older work, mixed context, long logs, or handoff prep, use `@.claude/skills/recipe-context-compact/SKILL.md`.
+- For broad reviews, release-readiness checks, or issues spanning multiple subsystems, use `@.claude/skills/recipe-parallel-audit/SKILL.md`.
+- For import bugs, data safety, SwiftUI flow bugs, destructive-action changes, or UI/UX resource decisions, use the focused playbook below that matches the task.
+- Keep this skill workflow lightweight; do not load every doc or skill when one focused playbook is enough.
+
 ## Project Playbooks
 
+- `@.claude/skills/recipe-handoff/SKILL.md`
+- `@.claude/skills/recipe-context-compact/SKILL.md`
+- `@.claude/skills/recipe-parallel-audit/SKILL.md`
 - `@.claude/skills/import-path-triage.md`
 - `@.claude/skills/recipe-data-safety.md`
 - `@.claude/skills/swiftui-flow-regression.md`
 - `@.claude/skills/backup-destructive-check.md`
+- `@.claude/skills/ui-ux-resource-eval.md`
 
 ## Avoid
 

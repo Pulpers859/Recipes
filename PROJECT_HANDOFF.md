@@ -47,8 +47,9 @@ If the GitHub remote is unknown, the agent should finish local bootstrap first a
 ## PowerShell / Terminal Standard
 - Do not globally pin every PowerShell session to this project.
 - A dedicated shortcut should exist:
-  - `Recipe Vault PowerShell`
+  - `Recipes Claude Code`
 - That shortcut should open directly in the source-of-truth repo path.
+- The shortcut should call `tools/Launch-Recipes-Claude.ps1` through PowerShell 7 when available, matching the Transform and Procedures desktop launch pattern.
 - Avoid fragile startup command strings if the path contains apostrophes or quoting hazards.
 
 ## How The Agent Should Operate
