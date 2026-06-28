@@ -11,7 +11,18 @@ $repoSkillsRoot = Join-Path $repoRoot '.claude\skills'
 $repoCommandsRoot = Join-Path $repoRoot '.claude\commands'
 
 function Resolve-ClaudeCommand {
+    $packageRoot = Join-Path $env:APPDATA 'npm\node_modules\@anthropic-ai\claude-code'
+    if (Test-Path -LiteralPath $packageRoot) {
+        $directExecutable = Get-ChildItem -LiteralPath $packageRoot -Recurse -File -Filter 'claude.exe' -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+
+        if ($directExecutable) {
+            return $directExecutable.FullName
+        }
+    }
+
     $candidatePaths = @(
+        (Join-Path $env:APPDATA 'npm\claude.ps1'),
         (Join-Path $env:APPDATA 'npm\claude.cmd'),
         (Join-Path $env:APPDATA 'npm\claude')
     )
