@@ -340,6 +340,7 @@ struct ShoppingListView: View {
         .contextMenu {
             Button(role: .destructive) {
                 modelContext.delete(item)
+                saveChanges(failureMessage: "Could not delete this item")
                 AnalyticsService.shared.track("shopping_item_deleted")
             } label: {
                 Label("Delete Item", systemImage: "trash")
@@ -582,6 +583,7 @@ struct ShoppingListView: View {
         return numerator / denominator
     }
 
+    @discardableResult
     private func saveChanges(failureMessage: String) -> Bool {
         do {
             try modelContext.save()

@@ -190,12 +190,21 @@ class ShoppingListService {
         ("greek yogurt", "greek yogurt"),
     ]
 
+    private nonisolated static let leadingAmountRegex: NSRegularExpression? = {
+        try? NSRegularExpression(pattern: #"^\d+[\./]?\d*\s*(g|oz|ml|lb|kg|cups?|tbsp|tsp)\s+"#, options: .caseInsensitive)
+    }()
+
+    private nonisolated static let compiledSynonyms: [(regex: NSRegularExpression, canonical: String)] = {
+        synonyms.compactMap { syn in
+            guard let regex = try? NSRegularExpression(pattern: syn.pattern, options: .caseInsensitive) else { return nil }
+            return (regex, syn.canonical)
+        }
+    }()
+
     private nonisolated static func mergeKey(name: String) -> String {
         var s = name.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // Strip leading amounts that might be baked into the name (e.g. "150g liquid egg whites")
-        // Pattern: optional number+unit at the start
-        if let regex = try? NSRegularExpression(pattern: #"^\d+[\./]?\d*\s*(g|oz|ml|lb|kg|cups?|tbsp|tsp)\s+"#, options: .caseInsensitive) {
+        if let regex = leadingAmountRegex {
             s = regex.stringByReplacingMatches(in: s, range: NSRange(s.startIndex..., in: s), withTemplate: "")
         }
 
@@ -221,13 +230,11 @@ class ShoppingListService {
             }
         }
 
-        for syn in synonyms {
-            if let regex = try? NSRegularExpression(pattern: syn.pattern, options: .caseInsensitive) {
-                let range = NSRange(s.startIndex..., in: s)
-                if regex.firstMatch(in: s, range: range) != nil {
-                    s = syn.canonical
-                    break
-                }
+        for syn in compiledSynonyms {
+            let range = NSRange(s.startIndex..., in: s)
+            if syn.regex.firstMatch(in: s, range: range) != nil {
+                s = syn.canonical
+                break
             }
         }
 
@@ -257,7 +264,7 @@ class ShoppingListService {
     
     // MARK: - Unit Normalization & Conversion
     
-    private static func normalizeUnit(_ unit: String) -> String {
+    static func normalizeUnit(_ unit: String) -> String {
         let u = unit.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         switch u {
         case "cups", "cup": return "cup"

@@ -599,8 +599,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Extract Counter Cookbook recipes into RecipeVault JSON backup format.")
     parser.add_argument(
         "--pdf",
-        default=r"C:\Users\Patrick's Computer\Downloads\Counter_Cookbook.pdf",
-        help="Path to source PDF",
+        required=True,
+        help="Path to source PDF (e.g. Counter_Cookbook.pdf)",
     )
     parser.add_argument(
         "--out",

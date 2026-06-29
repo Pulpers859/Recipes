@@ -237,7 +237,9 @@ def collect_images_as_base64(block: str, source_root: Path) -> list[str]:
             continue
         seen.add(normalized)
 
-        full_path = source_root / normalized
+        full_path = (source_root / normalized).resolve()
+        if not str(full_path).startswith(str(source_root.resolve())):
+            continue
         if not full_path.exists():
             continue
 

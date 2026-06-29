@@ -673,6 +673,7 @@ struct PantryView: View {
             try modelContext.save()
             return true
         } catch {
+            modelContext.rollback()
             pantryStatusMessage = "Could not save pantry changes: \(error.localizedDescription)"
             AnalyticsService.shared.track("pantry_save_failed")
             return false

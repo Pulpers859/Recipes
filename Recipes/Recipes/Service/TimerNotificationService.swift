@@ -8,6 +8,12 @@ final class TimerNotificationService {
     static let shared = TimerNotificationService()
     private init() {}
 
+    private static let deniedKey = "timer_notifications_denied"
+
+    var isNotificationDenied: Bool {
+        UserDefaults.standard.bool(forKey: Self.deniedKey)
+    }
+
     private func identifier(for stepID: UUID) -> String {
         "cooking-timer-\(stepID.uuidString)"
     }
@@ -17,8 +23,16 @@ final class TimerNotificationService {
     func requestAuthorizationIfNeeded() {
         let center = UNUserNotificationCenter.current()
         center.getNotificationSettings { settings in
-            guard settings.authorizationStatus == .notDetermined else { return }
-            center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+            switch settings.authorizationStatus {
+            case .notDetermined:
+                center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+                    UserDefaults.standard.set(!granted, forKey: Self.deniedKey)
+                }
+            case .denied:
+                UserDefaults.standard.set(true, forKey: Self.deniedKey)
+            default:
+                UserDefaults.standard.set(false, forKey: Self.deniedKey)
+            }
         }
     }
 

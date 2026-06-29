@@ -90,10 +90,10 @@ struct AIParsedRecipe: Decodable {
             servings: min(max(servings ?? 4, 1), 1000),
             prepTime: min(max(prepTime ?? 0, 0), 100_000),
             cookTime: min(max(cookTime ?? 0, 0), 100_000),
-            category: RecipeCategory(rawValue: category ?? "") ?? .other,
+            category: RecipeCategory(rawValue: (category ?? "").lowercased()) ?? .other,
             tags: tags ?? [],
             cuisine: cuisine ?? "",
-            difficulty: Difficulty(rawValue: difficulty ?? "") ?? .medium,
+            difficulty: Difficulty(rawValue: (difficulty ?? "").lowercased()) ?? .medium,
             sourceURL: sourceURL,
             sourceType: sourceType,
             originalPDFData: originalPDFData

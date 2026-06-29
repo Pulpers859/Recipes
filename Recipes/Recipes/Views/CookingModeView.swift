@@ -173,6 +173,7 @@ struct CookingModeView: View {
             Button("Mark as Cooked & Close") {
                 recipe.timesCooked += 1
                 recipe.dateLastCooked = Date()
+                try? recipe.modelContext?.save()
                 dismiss()
             }
             Button("Close Without Marking") {

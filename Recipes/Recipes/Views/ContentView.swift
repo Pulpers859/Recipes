@@ -86,7 +86,9 @@ struct ContentView: View {
             }
         }
         .alert("Recipe Storage Problem", isPresented: $showDatabaseError) {
-            Button("OK", role: .cancel) { }
+            Button("OK", role: .cancel) {
+                UserDefaults.standard.removeObject(forKey: "database_error")
+            }
         } message: {
             // The data stack writes a message specific to how it recovered
             // (reset-but-persistent vs. temporary in-memory), so show it

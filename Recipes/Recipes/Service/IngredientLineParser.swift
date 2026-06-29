@@ -6,14 +6,32 @@ import Foundation
 /// the same way and can be unit-tested in one place.
 enum IngredientLineParser {
 
+    private static let unicodeFractionMap: [Character: Double] = [
+        "¼": 0.25, "½": 0.5, "¾": 0.75,
+        "⅓": 0.333, "⅔": 0.667,
+        "⅛": 0.125, "⅜": 0.375, "⅝": 0.625, "⅞": 0.875
+    ]
+
+    /// Separate "1½" into "1 ½" so the fraction parser can handle it.
+    private static func normalizeUnicodeFractions(_ text: String) -> String {
+        var result = text
+        for frac in unicodeFractionMap.keys {
+            let s = String(frac)
+            result = result.replacingOccurrences(of: s, with: " \(s) ")
+        }
+        return result.replacingOccurrences(of: "  ", with: " ")
+            .trimmingCharacters(in: .whitespaces)
+    }
+
     /// Parse an ingredient string like "2 cups all-purpose flour" into components.
     static func parse(_ rawLine: String) -> Ingredient {
         let cleaned = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // Pattern: optional amount, optional unit, then name.
+        // Pattern: optional amount (digits, fractions, slashes, dots — not hyphens,
+        // which indicate ranges handled separately), optional unit, then name.
         // The \b after the unit prevents short units from eating the start of
         // ingredient names ("2 garlic" must not parse as unit "g" + "arlic").
-        let pattern = #"^([\d\s¼½¾⅓⅔⅛⅜⅝⅞/.-]+)?\s*(?:(cups?|tbsp|tsp|tablespoons?|teaspoons?|oz|ounces?|lbs?|pounds?|g|grams?|kg|ml|liters?|l|pinch|cloves?|cans?|packages?|bunche?s?|sticks?|pieces?|slices?|heads?)\b)?\s*[.,]?\s*(.+)"#
+        let pattern = #"^([\d\s¼½¾⅓⅔⅛⅜⅝⅞/.]+(?:\s*-\s*[\d¼½¾⅓⅔⅛⅜⅝⅞/.]+)?)?\s*(?:(cups?|tbsp|tsp|tablespoons?|teaspoons?|oz|ounces?|lbs?|pounds?|g|grams?|kg|ml|liters?|l|pinch|cloves?|cans?|packages?|bunche?s?|sticks?|pieces?|slices?|heads?)\b)?\s*[.,]?\s*(.+)"#
 
         if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) {
             let range = NSRange(cleaned.startIndex..., in: cleaned)
@@ -37,19 +55,31 @@ enum IngredientLineParser {
         return Ingredient(name: cleaned)
     }
 
-    /// Convert fraction strings to Double: "1 1/2" → 1.5, "¾" → 0.75
+    /// Convert fraction strings to Double: "1 1/2" → 1.5, "¾" → 0.75, "2-3" → 2.5
     static func parseFractionAmount(_ str: String) -> Double {
-        let fractionMap: [Character: Double] = [
-            "¼": 0.25, "½": 0.5, "¾": 0.75,
-            "⅓": 0.333, "⅔": 0.667,
-            "⅛": 0.125, "⅜": 0.375, "⅝": 0.625, "⅞": 0.875
-        ]
+        // Handle ranges like "2-3" by averaging.
+        if str.contains("-") {
+            let rangeParts = str.split(separator: "-").map {
+                String($0).trimmingCharacters(in: .whitespaces)
+            }
+            if rangeParts.count == 2 {
+                let lo = parseSingleAmount(rangeParts[0])
+                let hi = parseSingleAmount(rangeParts[1])
+                if lo > 0 && hi > 0 { return (lo + hi) / 2.0 }
+                if lo > 0 { return lo }
+                if hi > 0 { return hi }
+            }
+        }
+        return parseSingleAmount(str)
+    }
 
+    private static func parseSingleAmount(_ str: String) -> Double {
+        let normalized = normalizeUnicodeFractions(str)
         var total: Double = 0
-        let parts = str.split(separator: " ")
+        let parts = normalized.split(separator: " ")
 
         for part in parts {
-            if let unicodeFrac = part.first, let val = fractionMap[unicodeFrac] {
+            if let unicodeFrac = part.first, let val = unicodeFractionMap[unicodeFrac] {
                 total += val
             } else if part.contains("/") {
                 let fracParts = part.split(separator: "/")

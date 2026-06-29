@@ -57,7 +57,7 @@ final class AnalyticsService {
             .joined(separator: ",")
         let line = metadataText.isEmpty ? "\(timestamp) | \(event)" : "\(timestamp) | \(event) | \(metadataText)"
         
-        logger.log("\(line, privacy: .public)")
+        logger.log("\(line, privacy: .private)")
         
         // Read the FULL stored history — recentEvents() returns only the last
         // 20, which silently capped the log at 21 entries instead of 200.

@@ -81,6 +81,7 @@ enum MealPlanningService {
             plan.entries = entries
             didChange = true
         }
-        if didChange { try? modelContext.save() }
+        // Caller owns the final save — do not save here to preserve atomicity
+        // with the surrounding conflict-resolution or delete transaction.
     }
 }

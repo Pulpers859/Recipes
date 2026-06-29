@@ -32,28 +32,26 @@ class SpotlightIndexingService {
 
     // MARK: - Index a Single Recipe
     
-    func indexRecipe(_ recipe: Recipe) {
+    private func makeSearchableItem(for recipe: Recipe) -> CSSearchableItem {
         let attributeSet = CSSearchableItemAttributeSet(contentType: .content)
-        
         attributeSet.title = recipe.title
         attributeSet.contentDescription = buildDescription(for: recipe)
         attributeSet.keywords = buildKeywords(for: recipe)
-        
-        // Metadata
         attributeSet.creator = recipe.cuisine.isEmpty ? nil : recipe.cuisine
         attributeSet.rating = recipe.rating > 0 ? NSNumber(value: recipe.rating) : nil
         attributeSet.duration = recipe.totalTime > 0 ? NSNumber(value: recipe.totalTime * 60) : nil
-        
+
         let item = CSSearchableItem(
             uniqueIdentifier: recipe.id.uuidString,
             domainIdentifier: domainID,
             attributeSet: attributeSet
         )
-        
-        // Keep indexed for 90 days
         item.expirationDate = Calendar.current.date(byAdding: .day, value: 90, to: Date())
-        
-        CSSearchableIndex.default().indexSearchableItems([item]) { error in
+        return item
+    }
+
+    func indexRecipe(_ recipe: Recipe) {
+        CSSearchableIndex.default().indexSearchableItems([makeSearchableItem(for: recipe)]) { error in
             if let error {
                 #if DEBUG
                 print("Spotlight indexing error: \(error.localizedDescription)")
@@ -61,28 +59,12 @@ class SpotlightIndexingService {
             }
         }
     }
-    
+
     // MARK: - Index All Recipes
-    
+
     func indexAllRecipes(_ recipes: [Recipe]) {
-        let items = recipes.map { recipe -> CSSearchableItem in
-            let attributeSet = CSSearchableItemAttributeSet(contentType: .content)
-            attributeSet.title = recipe.title
-            attributeSet.contentDescription = buildDescription(for: recipe)
-            attributeSet.keywords = buildKeywords(for: recipe)
-            attributeSet.creator = recipe.cuisine.isEmpty ? nil : recipe.cuisine
-            attributeSet.rating = recipe.rating > 0 ? NSNumber(value: recipe.rating) : nil
-            attributeSet.duration = recipe.totalTime > 0 ? NSNumber(value: recipe.totalTime * 60) : nil
-            
-            let item = CSSearchableItem(
-                uniqueIdentifier: recipe.id.uuidString,
-                domainIdentifier: domainID,
-                attributeSet: attributeSet
-            )
-            item.expirationDate = Calendar.current.date(byAdding: .day, value: 90, to: Date())
-            return item
-        }
-        
+        let items = recipes.map { makeSearchableItem(for: $0) }
+
         CSSearchableIndex.default().indexSearchableItems(items) { error in
             if let error {
                 #if DEBUG

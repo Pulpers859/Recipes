@@ -24,6 +24,7 @@ struct SettingsView: View {
     @State private var syncResult: String?
     @State private var showDeleteAllConfirm = false
     @State private var apiKeySource: APIKeyStore.KeySource?
+    @State private var apiKeyMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -158,6 +159,10 @@ struct SettingsView: View {
                 Text("Sonnet (Balanced)").tag("claude-sonnet-4-6")
             }
 
+            if let message = apiKeyMessage {
+                RVStatusBanner(message: message, tone: message.lowercased().contains("could not") ? .danger : .success)
+            }
+
             RVStatusBanner(
                 message: "Keys are stored in the iOS Keychain or supplied by build settings. Never commit a real key to source control.",
                 tone: .info
@@ -282,7 +287,7 @@ struct SettingsView: View {
     private var aboutCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             RVSectionTitle(title: "About")
-            StatRow(label: "Version", value: "1.0.0")
+            StatRow(label: "Version", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")
             StatRow(label: "Recipe Vault", value: "SwiftUI + Claude")
         }
         .rvCard()
@@ -448,9 +453,9 @@ struct SettingsView: View {
             apiKey = trimmed
             tempAPIKey = trimmed
             apiKeySource = .keychain
-            exportMessage = "API key saved securely."
+            apiKeyMessage = "API key saved securely."
         } catch {
-            exportMessage = "Could not save API key: \(error.localizedDescription)"
+            apiKeyMessage = "Could not save API key: \(error.localizedDescription)"
         }
     }
     
@@ -460,9 +465,9 @@ struct SettingsView: View {
             apiKey = APIKeyStore.loadClaudeKey() ?? ""
             tempAPIKey = ""
             apiKeySource = APIKeyStore.currentClaudeKeySource()
-            exportMessage = apiKeySource == .bundledConfig ? "Saved override removed. App is using bundled config." : "API key removed."
+            apiKeyMessage = apiKeySource == .bundledConfig ? "Saved override removed. App is using bundled config." : "API key removed."
         } catch {
-            exportMessage = "Could not remove API key: \(error.localizedDescription)"
+            apiKeyMessage = "Could not remove API key: \(error.localizedDescription)"
         }
     }
 

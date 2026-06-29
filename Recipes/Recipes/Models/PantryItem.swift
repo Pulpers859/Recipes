@@ -43,8 +43,8 @@ final class PantryItem {
     func absorbStock(amount incomingAmount: Double, unit incomingUnit: String) -> Bool {
         guard incomingAmount > 0 else { return true }
 
-        let existingUnit = unit.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let newUnit = incomingUnit.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let existingUnit = ShoppingListService.normalizeUnit(unit.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+        let newUnit = ShoppingListService.normalizeUnit(incomingUnit.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
 
         if amount <= 0 {
             amount = incomingAmount

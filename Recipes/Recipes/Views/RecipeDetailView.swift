@@ -228,60 +228,57 @@ struct RecipeDetailView: View {
     // MARK: - Cards
 
     private var headlineCard: some View {
-        surfaceCard {
-            VStack(alignment: .leading, spacing: 14) {
-                Text(recipe.title)
-                    .font(.system(.largeTitle, design: .serif, weight: .bold))
-                    .foregroundStyle(Color.rvInk)
+        VStack(alignment: .leading, spacing: 14) {
+            Text(recipe.title)
+                .font(.system(.largeTitle, design: .serif, weight: .bold))
+                .foregroundStyle(Color.rvInk)
 
-                if !recipe.summary.isEmpty {
-                    Text(recipe.summary)
-                        .font(.body)
-                        .foregroundStyle(Color.rvSubtleText)
-                }
+            if !recipe.summary.isEmpty {
+                Text(recipe.summary)
+                    .font(.body)
+                    .foregroundStyle(Color.rvSubtleText)
+            }
 
-                if !recipe.tags.isEmpty {
-                    FlowLayout(spacing: 8) {
-                        ForEach(recipe.tags, id: \.self) { tag in
-                            Text(tag)
-                                .font(.caption.weight(.semibold))
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 7)
-                                .background(Color.rvSurface, in: Capsule())
-                                .foregroundStyle(Color.rvInk)
-                        }
+            if !recipe.tags.isEmpty {
+                FlowLayout(spacing: 8) {
+                    ForEach(recipe.tags, id: \.self) { tag in
+                        Text(tag)
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 7)
+                            .background(Color.rvSurface, in: Capsule())
+                            .foregroundStyle(Color.rvInk)
                     }
                 }
             }
         }
+        .rvCard()
     }
 
     private var metadataCard: some View {
-        surfaceCard {
-            VStack(alignment: .leading, spacing: 14) {
-                sectionTitle("At a Glance")
+        VStack(alignment: .leading, spacing: 14) {
+            sectionTitle("At a Glance")
 
-                HStack(spacing: 10) {
-                    metadataPill(icon: "clock", title: "Prep", value: "\(recipe.prepTime) min")
-                    metadataPill(icon: "flame.fill", title: "Cook", value: "\(recipe.cookTime) min")
-                }
+            HStack(spacing: 10) {
+                metadataPill(icon: "clock", title: "Prep", value: "\(recipe.prepTime) min")
+                metadataPill(icon: "flame.fill", title: "Cook", value: "\(recipe.cookTime) min")
+            }
 
-                HStack(spacing: 10) {
-                    metadataPill(icon: "speedometer", title: "Level", value: recipe.difficulty.displayName)
+            HStack(spacing: 10) {
+                metadataPill(icon: "speedometer", title: "Level", value: recipe.difficulty.displayName)
 
-                    if recipe.timesCooked > 0 {
-                        metadataPill(icon: "checkmark.circle", title: "Cooked", value: "\(recipe.timesCooked)x")
-                    } else if recipe.rating > 0 {
-                        metadataPill(icon: "star.fill", title: "Rating", value: "\(recipe.rating)/5")
-                    }
+                if recipe.timesCooked > 0 {
+                    metadataPill(icon: "checkmark.circle", title: "Cooked", value: "\(recipe.timesCooked)x")
+                } else if recipe.rating > 0 {
+                    metadataPill(icon: "star.fill", title: "Rating", value: "\(recipe.rating)/5")
                 }
             }
         }
+        .rvCard()
     }
 
     private var servingScalerCard: some View {
-        surfaceCard {
-            HStack {
+        HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Servings")
                         .font(.system(.title3, design: .serif, weight: .bold))
@@ -326,143 +323,123 @@ struct RecipeDetailView: View {
                     .foregroundStyle(Color.rvAccent)
                 }
             }
-        }
+        .rvCard()
     }
 
     private var ingredientsCard: some View {
-        surfaceCard {
-            VStack(alignment: .leading, spacing: 14) {
-                sectionTitle("Ingredients")
+        VStack(alignment: .leading, spacing: 14) {
+            sectionTitle("Ingredients")
 
-                let scaled = recipe.scaledIngredients(for: targetServings)
-                let sections = Dictionary(grouping: scaled) { $0.section }
-                let sortedKeys = sections.keys.sorted { a, b in
-                    if a.isEmpty { return false }
-                    if b.isEmpty { return true }
-                    return a < b
-                }
+            let scaled = recipe.scaledIngredients(for: targetServings)
+            let sections = Dictionary(grouping: scaled) { $0.section }
+            let sortedKeys = sections.keys.sorted { a, b in
+                if a.isEmpty { return false }
+                if b.isEmpty { return true }
+                return a < b
+            }
 
-                ForEach(sortedKeys, id: \.self) { section in
-                    VStack(alignment: .leading, spacing: 12) {
-                        if !section.isEmpty {
-                            ingredientSectionHeader(section)
+            ForEach(sortedKeys, id: \.self) { section in
+                VStack(alignment: .leading, spacing: 12) {
+                    if !section.isEmpty {
+                        ingredientSectionHeader(section)
+                            .padding(.top, 6)
+                    }
+
+                    ForEach(sections[section] ?? []) { ingredient in
+                        HStack(alignment: .top, spacing: 10) {
+                            Circle()
+                                .fill(Color.rvPrimary.opacity(0.35))
+                                .frame(width: 8, height: 8)
                                 .padding(.top, 6)
-                        }
 
-                        ForEach(sections[section] ?? []) { ingredient in
-                            HStack(alignment: .top, spacing: 10) {
-                                Circle()
-                                    .fill(Color.rvPrimary.opacity(0.35))
-                                    .frame(width: 8, height: 8)
-                                    .padding(.top, 6)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(ingredient.displayString)
+                                    .font(.body)
+                                    .foregroundStyle(Color.rvInk)
 
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(ingredient.displayString)
-                                        .font(.body)
-                                        .foregroundStyle(Color.rvInk)
-
-                                    if ingredient.isOptional {
-                                        Text("Optional")
-                                            .font(.caption)
-                                            .foregroundStyle(Color.rvSubtleText)
-                                            .italic()
-                                    }
+                                if ingredient.isOptional {
+                                    Text("Optional")
+                                        .font(.caption)
+                                        .foregroundStyle(Color.rvSubtleText)
+                                        .italic()
                                 }
-
-                                Spacer()
                             }
+
+                            Spacer()
                         }
                     }
                 }
             }
         }
+        .rvCard()
     }
 
     private var stepsCard: some View {
-        surfaceCard {
-            VStack(alignment: .leading, spacing: 14) {
-                sectionTitle("Instructions")
+        VStack(alignment: .leading, spacing: 14) {
+            sectionTitle("Instructions")
 
-                ForEach(Array(recipe.steps.sorted(by: { $0.order < $1.order }).enumerated()), id: \.element.id) { index, step in
-                    HStack(alignment: .top, spacing: 14) {
-                        Text("\(index + 1)")
-                            .font(.headline)
-                            .foregroundStyle(.white)
-                            .frame(width: 32, height: 32)
-                            .background(LinearGradient.rvAccentGradient, in: Circle())
+            ForEach(Array(recipe.steps.sorted(by: { $0.order < $1.order }).enumerated()), id: \.element.id) { index, step in
+                HStack(alignment: .top, spacing: 14) {
+                    Text("\(index + 1)")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .frame(width: 32, height: 32)
+                        .background(LinearGradient.rvAccentGradient, in: Circle())
 
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(step.instruction)
-                                .font(.body)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(step.instruction)
+                            .font(.body)
+                            .foregroundStyle(Color.rvInk)
+
+                        if let timerStr = step.timerFormatted {
+                            Label(timerStr, systemImage: "timer")
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(Color.rvSurface, in: Capsule())
                                 .foregroundStyle(Color.rvInk)
-
-                            if let timerStr = step.timerFormatted {
-                                Label(timerStr, systemImage: "timer")
-                                    .font(.caption.weight(.semibold))
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 6)
-                                    .background(Color.rvSurface, in: Capsule())
-                                    .foregroundStyle(Color.rvInk)
-                            }
                         }
                     }
                 }
             }
         }
+        .rvCard()
     }
 
     @ViewBuilder
     private var notesCard: some View {
-        surfaceCard {
-            VStack(alignment: .leading, spacing: 14) {
-                if !recipe.notes.isEmpty {
-                    sectionTitle("Notes")
-                    Text(recipe.notes)
-                        .font(.body)
-                        .foregroundStyle(Color.rvSubtleText)
-                }
+        VStack(alignment: .leading, spacing: 14) {
+            if !recipe.notes.isEmpty {
+                sectionTitle("Notes")
+                Text(recipe.notes)
+                    .font(.body)
+                    .foregroundStyle(Color.rvSubtleText)
+                Divider()
+            }
 
-                if !recipe.notes.isEmpty {
-                    Divider()
-                }
+            Text("Rating")
+                .font(.system(.title3, design: .serif, weight: .bold))
+                .foregroundStyle(Color.rvInk)
 
-                Text("Rating")
-                    .font(.system(.title3, design: .serif, weight: .bold))
-                    .foregroundStyle(Color.rvInk)
-
-                // Buttons (not tap gestures) so VoiceOver users can actually
-                // rate recipes; gestures on Images are invisible to it.
-                HStack(spacing: 8) {
-                    ForEach(1...5, id: \.self) { star in
-                        Button {
-                            recipe.rating = star == recipe.rating ? 0 : star
-                        } label: {
-                            Image(systemName: star <= recipe.rating ? "star.fill" : "star")
-                                .font(.title3)
-                                .foregroundStyle(star <= recipe.rating ? Color.rvAccent : Color.rvMuted.opacity(0.55))
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("\(star) star\(star == 1 ? "" : "s")")
-                        .accessibilityAddTraits(star <= recipe.rating ? .isSelected : [])
+            HStack(spacing: 8) {
+                ForEach(1...5, id: \.self) { star in
+                    Button {
+                        recipe.rating = star == recipe.rating ? 0 : star
+                        saveRecipeChange(failureMessage: "Could not update rating")
+                    } label: {
+                        Image(systemName: star <= recipe.rating ? "star.fill" : "star")
+                            .font(.title3)
+                            .foregroundStyle(star <= recipe.rating ? Color.rvAccent : Color.rvMuted.opacity(0.55))
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(star) star\(star == 1 ? "" : "s")")
+                    .accessibilityAddTraits(star <= recipe.rating ? .isSelected : [])
                 }
-                .accessibilityElement(children: .contain)
-                .accessibilityLabel(recipe.rating > 0 ? "Rating: \(recipe.rating) of 5 stars" : "Not rated")
             }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(recipe.rating > 0 ? "Rating: \(recipe.rating) of 5 stars" : "Not rated")
         }
-    }
-
-    private func surfaceCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        content()
-            .padding(20)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.rvPaper)
-            .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 28, style: .continuous)
-                    .stroke(Color.white.opacity(0.7), lineWidth: 1)
-            }
-            .shadow(color: .black.opacity(0.05), radius: 16, y: 8)
+        .rvCard()
     }
 
     private func sectionTitle(_ title: String) -> some View {

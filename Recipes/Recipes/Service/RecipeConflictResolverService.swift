@@ -56,23 +56,24 @@ enum RecipeConflictResolverService {
     /// For title-only matches, require the ingredient lists to substantially
     /// overlap before destructively merging.
     private nonisolated static func isConfidentDuplicate(_ candidate: Recipe, of canonical: Recipe) -> Bool {
-        let source = (canonical.sourceURL ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if !source.isEmpty { return true }
-
         let candidateKeys = ingredientKeySet(candidate)
         let canonicalKeys = ingredientKeySet(canonical)
 
-        // A recipe with no ingredients is an empty shell — safe to fold in.
-        if candidateKeys.isEmpty || canonicalKeys.isEmpty { return true }
+        // Both empty — structurally identical stubs, safe to fold.
+        if candidateKeys.isEmpty && canonicalKeys.isEmpty { return true }
+
+        // One has ingredients and the other doesn't — not safe to assume duplicate.
+        if candidateKeys.isEmpty || canonicalKeys.isEmpty { return false }
 
         let overlap = candidateKeys.intersection(canonicalKeys).count
         let union = candidateKeys.union(canonicalKeys).count
         guard union > 0 else { return true }
-        // Require a strong (not just majority) ingredient overlap before a
-        // destructive merge. The loser's distinct ingredients are discarded
-        // when the canonical already has its own, so a 50%-similar pair is too
-        // weak a signal to delete one — demand near-identical lists.
-        return Double(overlap) / Double(union) >= 0.8
+
+        let source = (canonical.sourceURL ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        // A shared source URL is strong evidence but still require some
+        // ingredient agreement to avoid deleting user-edited variants.
+        let threshold = source.isEmpty ? 0.8 : 0.5
+        return Double(overlap) / Double(union) >= threshold
     }
 
     private nonisolated static func ingredientKeySet(_ recipe: Recipe) -> Set<String> {
