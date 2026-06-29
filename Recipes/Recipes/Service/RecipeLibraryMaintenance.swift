@@ -35,7 +35,7 @@ enum RecipeLibraryMaintenance {
 
     /// Stable dedupe key: lowercased title + sorted, lowercased ingredient
     /// names. Identical to the previous `recipeFingerprint(_:)` in the view.
-    static func fingerprint(for recipe: Recipe) -> String {
+    nonisolated static func fingerprint(for recipe: Recipe) -> String {
         let title = recipe.title
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()

@@ -46,6 +46,12 @@ struct MealPlanView: View {
         }
     }
 
+    private var recipePickerEmptyMessage: String {
+        let query = recipeSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return "No recipes in your library yet." }
+        return "No recipes match \"\(query)\"."
+    }
+
     private var selectedDayName: String {
         days[selectedDay]
     }
@@ -359,7 +365,7 @@ struct MealPlanView: View {
                         Image(systemName: recipeSearchText.isEmpty ? "book.closed" : "magnifyingglass")
                             .font(.system(size: 36))
                             .foregroundStyle(Color.rvAccent.opacity(0.6))
-                        Text(recipeSearchText.isEmpty ? "No recipes in your library yet." : "No recipes match "\(recipeSearchText)".")
+                        Text(recipePickerEmptyMessage)
                             .font(.subheadline)
                             .foregroundStyle(Color.rvSubtleText)
                             .multilineTextAlignment(.center)
