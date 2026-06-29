@@ -94,4 +94,12 @@ final class ShoppingListServiceTests: XCTestCase {
         XCTAssertEqual(ShoppingListService.parsedUnit(from: "lbs"), "lb")
         XCTAssertNil(ShoppingListService.parsedUnit(from: "chicken"))
     }
+
+    // MARK: - Category Suggestions
+
+    func testWatermelonDoesNotMatchWaterBeverageRule() {
+        XCTAssertEqual(ShoppingListService.suggestedCategory(for: "watermelon"), .produce)
+        XCTAssertEqual(ShoppingListService.suggestedCategory(for: "sparkling water"), .beverages)
+        XCTAssertEqual(ShoppingListService.suggestedCategory(for: "green tea"), .beverages)
+    }
 }

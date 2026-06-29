@@ -206,28 +206,15 @@ struct MealPlanView: View {
     }
 
     private var heroHeader: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Meal Plan")
-                .font(.system(.largeTitle, design: .serif, weight: .bold))
-                .foregroundStyle(Color.rvInk)
-
-            Text("Shape the week, then turn it into a shopping list with pantry-aware ingredients.")
-                .font(.subheadline)
-                .foregroundStyle(Color.rvSubtleText)
-
-            HStack(spacing: 12) {
-                summaryPill(title: "Planned Meals", value: "\(currentPlan?.entries.count ?? 0)")
-                summaryPill(title: selectedDayName, value: "\(selectedDayEntriesCount)")
-            }
-        }
-        .padding(22)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(LinearGradient.rvHeroGradient)
-        .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 30, style: .continuous)
-                .stroke(Color.white.opacity(0.6), lineWidth: 1)
-        }
+        RVHeroBanner(
+            title: "Meal Plan",
+            subtitle: "Shape the week, then turn it into a shopping list with pantry-aware ingredients.",
+            systemImage: "calendar",
+            metrics: [
+                ("Planned Meals", "\(currentPlan?.entries.count ?? 0)"),
+                (selectedDayName, "\(selectedDayEntriesCount)")
+            ]
+        )
     }
 
     private var daySelector: some View {
@@ -362,21 +349,6 @@ struct MealPlanView: View {
         entries[idx].servings = newValue
         plan.entries = entries
         _ = saveChanges(failureMessage: "Could not update servings")
-    }
-
-    private func summaryPill(title: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title.uppercased())
-                .font(.caption2.weight(.bold))
-                .tracking(1)
-                .foregroundStyle(Color.rvSubtleText)
-            Text(value)
-                .font(.title3.bold())
-                .foregroundStyle(Color.rvInk)
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.75), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private var recipePickerSheet: some View {

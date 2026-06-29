@@ -29,13 +29,18 @@ struct PantryView: View {
     }
     private var checkedShoppingItems: [ShoppingItem] { shoppingItems.filter { $0.isChecked } }
     private var activePantryCoverageCount: Int { pantryItems.filter { $0.isStaple || $0.amount > 0 }.count }
-    private var pantryBackupFingerprint: String {
-        pantryItems
-            .map {
-                "\($0.id.uuidString)|\($0.name)|\($0.amount)|\($0.unit)|\($0.category.rawValue)|\($0.isStaple)|\($0.dateUpdated.timeIntervalSince1970)"
-            }
-            .sorted()
-            .joined(separator: "||")
+    private var pantryBackupFingerprint: Int {
+        var hasher = Hasher()
+        for item in pantryItems {
+            hasher.combine(item.id)
+            hasher.combine(item.name)
+            hasher.combine(item.amount)
+            hasher.combine(item.unit)
+            hasher.combine(item.category.rawValue)
+            hasher.combine(item.isStaple)
+            hasher.combine(item.dateUpdated.timeIntervalSince1970)
+        }
+        return hasher.finalize()
     }
 
     private var filteredPantryItems: [PantryItem] {
@@ -161,6 +166,15 @@ struct PantryView: View {
             .onChange(of: pantryBackupFingerprint) { _, _ in
                 refreshAutomaticBackup()
             }
+            .onChange(of: pantryStatusMessage) { _, newMessage in
+                guard newMessage != nil else { return }
+                Task {
+                    try? await Task.sleep(for: .seconds(4))
+                    if pantryStatusMessage == newMessage {
+                        withAnimation { pantryStatusMessage = nil }
+                    }
+                }
+            }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .background || phase == .inactive {
                     refreshAutomaticBackup()
@@ -170,28 +184,15 @@ struct PantryView: View {
     }
 
     private var heroHeader: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Pantry")
-                .font(.system(.largeTitle, design: .serif, weight: .bold))
-                .foregroundStyle(Color.rvInk)
-
-            Text("Track staples and quantities so your shopping list knows what’s already covered.")
-                .font(.subheadline)
-                .foregroundStyle(Color.rvSubtleText)
-
-            HStack(spacing: 12) {
-                summaryPill(title: "Items", value: "\(pantryItems.count)")
-                summaryPill(title: "Covering", value: "\(activePantryCoverageCount)")
-            }
-        }
-        .padding(22)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(LinearGradient.rvHeroGradient)
-        .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 30, style: .continuous)
-                .stroke(Color.white.opacity(0.6), lineWidth: 1)
-        }
+        RVHeroBanner(
+            title: "Pantry",
+            subtitle: "Track staples and quantities so your shopping list knows what’s already covered.",
+            systemImage: "cabinet.fill",
+            metrics: [
+                ("Items", "\(pantryItems.count)"),
+                ("Covering", "\(activePantryCoverageCount)")
+            ]
+        )
     }
 
     private var searchCard: some View {
@@ -428,21 +429,6 @@ struct PantryView: View {
         .padding(.horizontal, 20)
         .background(Color.rvPaper)
         .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
-    }
-
-    private func summaryPill(title: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title.uppercased())
-                .font(.caption2.weight(.bold))
-                .tracking(1)
-                .foregroundStyle(Color.rvSubtleText)
-            Text(value)
-                .font(.title3.bold())
-                .foregroundStyle(Color.rvInk)
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.75), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private func statusCard(_ message: String) -> some View {

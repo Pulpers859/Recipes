@@ -103,14 +103,19 @@ def parse_minutes(text: str) -> int:
     return nums[0]
 
 
-def parse_fraction(token: str) -> float:
+def parse_fraction(token: str, _depth: int = 0) -> float:
+    if _depth > 2:
+        return 0.0
     token = token.strip()
     if " " in token and "/" in token:
         whole, frac = token.split(" ", 1)
-        return float(whole) + parse_fraction(frac)
+        return float(whole) + parse_fraction(frac, _depth + 1)
     if "/" in token:
         a, b = token.split("/", 1)
-        return float(a) / float(b)
+        denom = float(b)
+        if denom == 0:
+            return 0.0
+        return float(a) / denom
     return float(token)
 
 
@@ -617,6 +622,7 @@ def main() -> None:
     payload = build_export_wrapper(recipes)
 
     out_path = Path(args.out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
     print(f"Extracted {len(recipes)} recipes")

@@ -375,7 +375,9 @@ class ShoppingListService {
                          "avocado", "cucumber", "zucchini", "broccoli", "cauliflower", "corn", "bean sprout",
                          "ginger", "jalapeño", "jalapeno", "serrano", "scallion", "shallot", "leek",
                          "apple", "banana", "berry", "blueberry", "blueberries", "strawberry", "raspberry",
-                         "green onion"]),
+                         "green onion", "watermelon", "melon", "cantaloupe", "honeydew",
+                         "peach", "pear", "plum", "grape", "mango", "pineapple", "orange",
+                         "cherry", "cranberry", "pomegranate", "fig", "date", "nectarine", "kiwi"]),
             (.dairy, ["milk", "cream", "butter", "cheese", "yogurt", "sour cream", "egg", "half-and-half",
                        "whipping cream", "crème", "ricotta", "mozzarella", "parmesan", "cheddar",
                        "american cheese", "cream cheese", "protein powder", "whey", "casein"]),
@@ -396,15 +398,25 @@ class ShoppingListService {
                         "pudding mix", "powdered sugar", "brown sugar", "tater tot",
                         "non-stick", "nonstick"]),
             (.frozen, ["frozen", "ice cream", "tater tot"]),
-            (.beverages, ["wine", "beer", "juice", "water", "soda", "coffee", "tea"])
+            (.beverages, ["wine", "beer", "juice", "soda", "coffee"])
         ]
-        
+
         for (category, keywords) in mapping {
             if keywords.contains(where: { lower.contains($0) }) {
                 return category
             }
         }
+
+        if matchesWord(lower, "water") || matchesWord(lower, "tea") {
+            return .beverages
+        }
+
         return .other
+    }
+
+    private static func matchesWord(_ text: String, _ word: String) -> Bool {
+        text.split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+            .contains { $0 == word }
     }
 }
 

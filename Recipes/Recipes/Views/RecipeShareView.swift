@@ -16,9 +16,11 @@ struct RecipeShareView: View {
                         .padding()
                 }
             }
-            .background(Color(.systemGroupedBackground))
+            .background(Color.rvBackground)
             .navigationTitle("Share Recipe")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(Color.rvBackground, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -41,51 +43,52 @@ struct RecipeShareView: View {
     
     private var shareCard: some View {
         VStack(alignment: .leading, spacing: 16) {
-            // Header
             VStack(alignment: .leading, spacing: 4) {
                 Text(recipe.title)
-                    .font(.title2.bold())
-                
+                    .font(.system(.title2, design: .serif, weight: .bold))
+                    .foregroundStyle(Color.rvInk)
+
                 if !recipe.summary.isEmpty {
                     Text(recipe.summary)
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.rvSubtleText)
                 }
-                
+
                 HStack(spacing: 16) {
                     Label("\(recipe.servings) servings", systemImage: "person.2")
                     Label("\(recipe.totalTime) min", systemImage: "clock")
                     Label(recipe.difficulty.displayName, systemImage: "speedometer")
                 }
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.rvSubtleText)
                 .padding(.top, 4)
             }
-            
+
             Divider()
-            
-            // Ingredients
+
             VStack(alignment: .leading, spacing: 6) {
                 Text("Ingredients")
-                    .font(.headline)
-                
+                    .font(.system(.headline, design: .serif))
+                    .foregroundStyle(Color.rvInk)
+
                 ForEach(recipe.normalizedIngredients) { ingredient in
                     HStack(alignment: .top, spacing: 6) {
                         Text("•")
                             .foregroundStyle(Color.rvAccent)
                         Text(ingredient.displayString)
                             .font(.subheadline)
+                            .foregroundStyle(Color.rvInk)
                     }
                 }
             }
-            
+
             Divider()
-            
-            // Steps
+
             VStack(alignment: .leading, spacing: 8) {
                 Text("Instructions")
-                    .font(.headline)
-                
+                    .font(.system(.headline, design: .serif))
+                    .foregroundStyle(Color.rvInk)
+
                 ForEach(Array(recipe.steps.sorted { $0.order < $1.order }.enumerated()), id: \.element.id) { idx, step in
                     HStack(alignment: .top, spacing: 8) {
                         Text("\(idx + 1).")
@@ -94,34 +97,35 @@ struct RecipeShareView: View {
                             .frame(width: 20, alignment: .trailing)
                         Text(step.instruction)
                             .font(.subheadline)
+                            .foregroundStyle(Color.rvInk)
                     }
                 }
             }
-            
+
             if !recipe.notes.isEmpty {
                 Divider()
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Notes")
-                        .font(.headline)
+                        .font(.system(.headline, design: .serif))
+                        .foregroundStyle(Color.rvInk)
                     Text(recipe.notes)
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.rvSubtleText)
                 }
             }
-            
-            // Footer
+
             HStack {
                 Spacer()
                 Text("Shared from Recipe Vault")
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Color.rvMuted)
             }
             .padding(.top, 8)
         }
-        .padding(20)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: .black.opacity(0.08), radius: 8, y: 4)
+        .padding(RVDesign.cardPadding)
+        .background(Color.rvPaper)
+        .clipShape(RoundedRectangle(cornerRadius: RVDesign.cardRadius, style: .continuous))
+        .shadow(color: .black.opacity(0.06), radius: 12, y: 6)
     }
     
     // MARK: - Formatted Text

@@ -201,10 +201,10 @@ struct RecipeListView: View {
                     .padding(.top, 8)
 
                 ZStack {
-                    RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    RoundedRectangle(cornerRadius: RVDesign.cardRadius, style: .continuous)
                         .fill(LinearGradient.rvHeroGradient)
                         .overlay {
-                            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                            RoundedRectangle(cornerRadius: RVDesign.cardRadius, style: .continuous)
                                 .stroke(Color.white.opacity(0.55), lineWidth: 1)
                         }
 
@@ -356,10 +356,10 @@ struct RecipeListView: View {
 
     private var heroHeader: some View {
         ZStack(alignment: .topTrailing) {
-            RoundedRectangle(cornerRadius: 32, style: .continuous)
+            RoundedRectangle(cornerRadius: RVDesign.heroRadius, style: .continuous)
                 .fill(LinearGradient.rvHeroGradient)
                 .overlay {
-                    RoundedRectangle(cornerRadius: 32, style: .continuous)
+                    RoundedRectangle(cornerRadius: RVDesign.heroRadius, style: .continuous)
                         .stroke(Color.white.opacity(0.55), lineWidth: 1)
                 }
 
@@ -384,7 +384,7 @@ struct RecipeListView: View {
                     Spacer(minLength: 16)
 
                     ZStack {
-                        RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        RoundedRectangle(cornerRadius: RVDesign.cardRadius, style: .continuous)
                             .fill(Color.white.opacity(0.85))
                             .frame(width: 68, height: 68)
 
@@ -438,9 +438,9 @@ struct RecipeListView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
             .background(Color.white.opacity(0.88))
-            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: RVDesign.controlRadius, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                RoundedRectangle(cornerRadius: RVDesign.controlRadius, style: .continuous)
                     .stroke(Color.rvTaupe.opacity(0.35), lineWidth: 1)
             }
 
@@ -470,7 +470,7 @@ struct RecipeListView: View {
         }
         .padding(18)
         .background(Color.rvSurface.opacity(0.95))
-        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: RVDesign.cardRadius, style: .continuous))
     }
 
     private var selectionToolbar: some View {
@@ -577,7 +577,7 @@ struct RecipeListView: View {
         .padding(.horizontal, 20)
         .padding(.vertical, 28)
         .background(Color.white.opacity(0.82))
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: RVDesign.cardRadius, style: .continuous))
     }
 
     private func heroActionButton(
@@ -633,9 +633,9 @@ struct RecipeListView: View {
         .padding(16)
         .frame(width: 230, height: 150, alignment: .leading)
         .background(Color.white.opacity(0.92))
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: RVDesign.cardRadius, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
+            RoundedRectangle(cornerRadius: RVDesign.cardRadius, style: .continuous)
                 .stroke(Color.white.opacity(0.6), lineWidth: 1)
         }
         .shadow(color: .black.opacity(0.05), radius: 12, y: 6)
@@ -910,10 +910,10 @@ struct RecipeCardView: View {
         }
         .padding(16)
         .background(Color.white.opacity(0.92))
-        .contentShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: RVDesign.cardRadius, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: RVDesign.cardRadius, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
+            RoundedRectangle(cornerRadius: RVDesign.cardRadius, style: .continuous)
                 .stroke(Color.white.opacity(0.7), lineWidth: 1)
         }
         .shadow(color: .black.opacity(0.06), radius: 16, y: 8)
@@ -939,10 +939,10 @@ struct RecipeCardView: View {
                 .scaledToFill()
                 .frame(maxWidth: .infinity)
                 .frame(height: 186)
-                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: RVDesign.controlRadius, style: .continuous))
         } else {
             ZStack {
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                RoundedRectangle(cornerRadius: RVDesign.controlRadius, style: .continuous)
                     .fill(categoryGradient)
                     .frame(maxWidth: .infinity)
                     .frame(height: 186)
