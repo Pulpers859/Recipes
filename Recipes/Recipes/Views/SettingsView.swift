@@ -452,8 +452,10 @@ struct SettingsView: View {
             try data.write(to: tempURL)
             shareURL = tempURL
             showShareSheet = true
-            exportMessage = "Exported \(recipes.count) recipes"
-            AnalyticsService.shared.track("backup_export_json", metadata: ["count": "\(recipes.count)"])
+            let sizeMB = Double(data.count) / (1024 * 1024)
+            let sizeNote = sizeMB > 25 ? " (\(String(format: "%.0f", sizeMB)) MB — photos are embedded inline)" : ""
+            exportMessage = "Exported \(recipes.count) recipes\(sizeNote)"
+            AnalyticsService.shared.track("backup_export_json", metadata: ["count": "\(recipes.count)", "size_mb": "\(String(format: "%.1f", sizeMB))"])
         } catch {
             exportMessage = "Export failed: \(error.localizedDescription)"
             AnalyticsService.shared.track("backup_export_json_failed")

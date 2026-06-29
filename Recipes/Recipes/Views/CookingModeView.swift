@@ -12,6 +12,7 @@ struct CookingModeView: View {
     @State private var countdownTimers: [UUID: Timer] = [:]
     @State private var showIngredients = false
     @State private var showFinishOptions = false
+    @State private var showTimerDismissWarning = false
     
     private var sortedSteps: [RecipeStep] {
         recipe.steps.sorted { $0.order < $1.order }
@@ -29,8 +30,14 @@ struct CookingModeView: View {
             VStack(spacing: 0) {
                 // Top bar
                 HStack {
-                    Button("Done") { dismiss() }
-                        .foregroundStyle(.white)
+                    Button("Done") {
+                        if activeTimers.values.contains(where: { $0.isRunning }) {
+                            showTimerDismissWarning = true
+                        } else {
+                            dismiss()
+                        }
+                    }
+                    .foregroundStyle(.white)
                     
                     Spacer()
                     
@@ -93,7 +100,8 @@ struct CookingModeView: View {
                             }
                         } label: {
                             Image(systemName: "chevron.left.circle.fill")
-                                .font(.system(size: 56))
+                                .font(.system(.largeTitle, design: .default).weight(.medium))
+                                .imageScale(.large)
                                 .foregroundStyle(currentStepIndex > 0 ? Color.rvAccent : .gray.opacity(0.3))
                         }
                         .disabled(currentStepIndex == 0)
@@ -112,7 +120,8 @@ struct CookingModeView: View {
                             Image(systemName: currentStepIndex < sortedSteps.count - 1
                                   ? "chevron.right.circle.fill"
                                   : "checkmark.circle.fill")
-                                .font(.system(size: 56))
+                                .font(.system(.largeTitle, design: .default).weight(.medium))
+                                .imageScale(.large)
                                 .foregroundStyle(Color.rvAccent)
                         }
                         .accessibilityLabel(currentStepIndex < sortedSteps.count - 1 ? "Next step" : "Finish cooking")
@@ -169,6 +178,13 @@ struct CookingModeView: View {
         }
         // Finishing the last step is the natural moment to record a cook —
         // previously "Mark as Cooked" only existed buried in the detail menu.
+        .alert("Timers Still Running", isPresented: $showTimerDismissWarning) {
+            Button("Leave Anyway", role: .destructive) { dismiss() }
+            Button("Keep Cooking", role: .cancel) { }
+        } message: {
+            let count = activeTimers.values.filter(\.isRunning).count
+            Text("You have \(count) active timer\(count == 1 ? "" : "s"). Leaving will stop \(count == 1 ? "it" : "them").")
+        }
         .confirmationDialog("Finished cooking?", isPresented: $showFinishOptions, titleVisibility: .visible) {
             Button("Mark as Cooked & Close") {
                 recipe.timesCooked += 1
@@ -197,7 +213,7 @@ struct CookingModeView: View {
         VStack(spacing: 12) {
             if let state = timerState {
                 Text(state.formattedRemaining)
-                    .font(.system(size: 48, weight: .bold, design: .monospaced))
+                    .font(.system(.largeTitle, design: .monospaced).weight(.bold))
                     .foregroundStyle(state.remaining <= 10 ? .red : Color.rvAccent)
                 
                 HStack(spacing: 20) {

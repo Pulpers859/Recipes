@@ -66,6 +66,20 @@ enum MealPlanningService {
         }
     }
 
+    /// Updates the denormalized `recipeTitle` on any meal-plan entries that
+    /// reference `recipe`, so a rename in the editor is reflected immediately.
+    static func syncTitle(for recipe: Recipe, modelContext: ModelContext) {
+        let plans = (try? modelContext.fetch(FetchDescriptor<MealPlan>())) ?? []
+        for plan in plans {
+            guard plan.entries.contains(where: { $0.recipeID == recipe.id && $0.recipeTitle != recipe.title }) else { continue }
+            var entries = plan.entries
+            for index in entries.indices where entries[index].recipeID == recipe.id {
+                entries[index].recipeTitle = recipe.title
+            }
+            plan.entries = entries
+        }
+    }
+
     /// Re-points entries at a surviving recipe after duplicate resolution so
     /// planned meals follow the merged recipe instead of disappearing.
     static func retargetEntries(fromRecipeID oldID: UUID, to canonical: Recipe, modelContext: ModelContext) {

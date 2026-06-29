@@ -28,6 +28,7 @@ struct RecipeEditorView: View {
     @State private var showPhotoViewer = false
     @State private var selectedPhotoIndex = 0
     @State private var saveErrorMessage: String?
+    @State private var isLoadingPhotos = false
     
     @State private var newIngredientName = ""
     @State private var newIngredientAmount = ""
@@ -93,7 +94,7 @@ struct RecipeEditorView: View {
                         .foregroundStyle(.secondary)
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 10) {
-                            ForEach(Array(photoData.enumerated()), id: \.offset) { index, data in
+                            ForEach(Array(photoData.enumerated()), id: \.element) { index, data in
                                 photoThumbnail(data: data, index: index)
                             }
                         }
@@ -101,6 +102,15 @@ struct RecipeEditorView: View {
                     }
                 }
                 
+                if isLoadingPhotos {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                        Text("Loading photos…")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 PhotosPicker(
                     selection: $selectedPhotoItems,
                     maxSelectionCount: 12,
@@ -109,12 +119,13 @@ struct RecipeEditorView: View {
                     Label("Add Photos", systemImage: "photo.on.rectangle.angled")
                         .foregroundStyle(Color.rvAccent)
                 }
+                .disabled(isLoadingPhotos)
                 .onChange(of: selectedPhotoItems) { _, newItems in
                     Task {
+                        isLoadingPhotos = true
                         await loadSelectedPhotos(newItems)
-                        await MainActor.run {
-                            selectedPhotoItems = []
-                        }
+                        isLoadingPhotos = false
+                        selectedPhotoItems = []
                     }
                 }
             }
@@ -377,6 +388,7 @@ struct RecipeEditorView: View {
         }
 
         SpotlightIndexingService.shared.indexRecipe(recipe)
+        MealPlanningService.syncTitle(for: recipe, modelContext: modelContext)
 
         AnalyticsService.shared.track("recipe_saved", metadata: [
             "mode": isNewRecipe ? (isNewImport ? "import_new" : "manual_new") : "edit_existing",

@@ -131,6 +131,29 @@ struct PantryView: View {
             } message: {
                 Text("This adds back items from your most recent recovery snapshot. Items already in your pantry are left untouched.")
             }
+            .alert("Edit Quantity", isPresented: Binding(
+                get: { editingItem != nil },
+                set: { if !$0 { editingItem = nil } }
+            )) {
+                TextField("Amount", text: $editAmount)
+                    .keyboardType(.decimalPad)
+                TextField("Unit", text: $editUnit)
+                Button("Save") {
+                    if let item = editingItem {
+                        item.amount = IngredientLineParser.flexibleDouble(editAmount) ?? 0
+                        item.unit = editUnit.trimmingCharacters(in: .whitespacesAndNewlines)
+                        item.dateUpdated = Date()
+                        _ = persistPantryChanges(snapshot: pantryItems)
+                        pantryStatusMessage = "Updated \(item.name)."
+                    }
+                    editingItem = nil
+                }
+                Button("Cancel", role: .cancel) { editingItem = nil }
+            } message: {
+                if let item = editingItem {
+                    Text("Set quantity for \(item.name)")
+                }
+            }
             .onAppear {
                 refreshAutomaticBackup()
                 canRestoreBackup = PantryBackupService.hasRestorableBackup()
@@ -296,6 +319,10 @@ struct PantryView: View {
         }
     }
 
+    @State private var editingItem: PantryItem?
+    @State private var editAmount = ""
+    @State private var editUnit = ""
+
     private func pantryRow(_ item: PantryItem) -> some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
@@ -309,6 +336,17 @@ struct PantryView: View {
             }
 
             Spacer()
+
+            Button {
+                editingItem = item
+                editAmount = item.amount > 0 ? formatAmount(item.amount) : ""
+                editUnit = item.unit
+            } label: {
+                Image(systemName: "pencil.circle")
+                    .font(.title3)
+                    .foregroundStyle(Color.rvAccent)
+            }
+            .buttonStyle(.plain)
 
             Button {
                 item.isStaple.toggle()
@@ -332,6 +370,15 @@ struct PantryView: View {
                     .padding(.vertical, 7)
                     .background(Color.orange.opacity(0.14), in: Capsule())
                     .foregroundStyle(.orange)
+            }
+            .buttonStyle(.plain)
+
+            Button(role: .destructive) {
+                deletePantryItem(item)
+            } label: {
+                Image(systemName: "trash")
+                    .font(.subheadline)
+                    .foregroundStyle(.red.opacity(0.7))
             }
             .buttonStyle(.plain)
         }

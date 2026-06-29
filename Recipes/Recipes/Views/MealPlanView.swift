@@ -109,6 +109,11 @@ struct MealPlanView: View {
             } message: {
                 Text(actionErrorMessage ?? "An unknown error occurred.")
             }
+            .navigationDestination(for: UUID.self) { recipeID in
+                if let recipe = allRecipes.first(where: { $0.id == recipeID }) {
+                    RecipeDetailView(recipe: recipe)
+                }
+            }
             .onAppear {
                 migrateLegacyPlanIfNeeded()
             }
@@ -292,31 +297,7 @@ struct MealPlanView: View {
                     .padding(.vertical, 6)
             } else {
                 ForEach(entries) { entry in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(entry.recipeTitle)
-                                .font(.headline)
-                                .foregroundStyle(Color.rvInk)
-                                .fixedSize(horizontal: false, vertical: true)
-
-                            Text("\(entry.servings) servings")
-                                .font(.caption)
-                                .foregroundStyle(Color.rvSubtleText)
-                        }
-
-                        Spacer()
-
-                        Button {
-                            removeEntry(entry)
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.title3)
-                                .foregroundStyle(Color.rvMuted)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .padding(14)
-                    .background(Color.rvSurface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    entryRow(entry, in: currentPlan)
                 }
             }
         }
@@ -329,6 +310,58 @@ struct MealPlanView: View {
                 .stroke(Color.white.opacity(0.7), lineWidth: 1)
         }
         .shadow(color: .black.opacity(0.04), radius: 14, y: 7)
+    }
+
+    private func entryRow(_ entry: MealPlanEntry, in plan: MealPlan?) -> some View {
+        let linkedRecipe = allRecipes.first { $0.id == entry.recipeID }
+
+        return HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                if let recipe = linkedRecipe {
+                    NavigationLink(value: recipe.id) {
+                        Text(entry.recipeTitle)
+                            .font(.headline)
+                            .foregroundStyle(Color.rvInk)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Text(entry.recipeTitle)
+                        .font(.headline)
+                        .foregroundStyle(Color.rvSubtleText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Stepper("\(entry.servings) servings", value: Binding(
+                    get: { entry.servings },
+                    set: { newValue in updateServings(entry, to: newValue, in: plan) }
+                ), in: 1...100)
+                .font(.caption)
+                .foregroundStyle(Color.rvSubtleText)
+            }
+
+            Spacer()
+
+            Button {
+                removeEntry(entry)
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(Color.rvMuted)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(14)
+        .background(Color.rvSurface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private func updateServings(_ entry: MealPlanEntry, to newValue: Int, in plan: MealPlan?) {
+        guard let plan else { return }
+        var entries = plan.entries
+        guard let idx = entries.firstIndex(where: { $0.id == entry.id }) else { return }
+        entries[idx].servings = newValue
+        plan.entries = entries
+        _ = saveChanges(failureMessage: "Could not update servings")
     }
 
     private func summaryPill(title: String, value: String) -> some View {
@@ -348,30 +381,46 @@ struct MealPlanView: View {
 
     private var recipePickerSheet: some View {
         NavigationStack {
-            List(filteredRecipeChoices) { recipe in
-                Button {
-                    addEntry(recipe: recipe, slot: selectedSlot)
-                    recipeSearchText = ""
-                    showAddRecipe = false
-                } label: {
-                    HStack {
-                        Image(systemName: recipe.category.icon)
-                            .foregroundStyle(Color.rvAccent)
-                        VStack(alignment: .leading) {
-                            Text(recipe.title)
-                                .font(.subheadline.weight(.medium))
-                                .lineLimit(nil)
-                                .fixedSize(horizontal: false, vertical: true)
-                            if recipe.totalTime > 0 {
-                                Text("\(recipe.totalTime) min")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+            Group {
+                if filteredRecipeChoices.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: recipeSearchText.isEmpty ? "book.closed" : "magnifyingglass")
+                            .font(.system(size: 36))
+                            .foregroundStyle(Color.rvAccent.opacity(0.6))
+                        Text(recipeSearchText.isEmpty ? "No recipes in your library yet." : "No recipes match "\(recipeSearchText)".")
+                            .font(.subheadline)
+                            .foregroundStyle(Color.rvSubtleText)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding()
+                } else {
+                    List(filteredRecipeChoices) { recipe in
+                        Button {
+                            addEntry(recipe: recipe, slot: selectedSlot)
+                            recipeSearchText = ""
+                            showAddRecipe = false
+                        } label: {
+                            HStack {
+                                Image(systemName: recipe.category.icon)
+                                    .foregroundStyle(Color.rvAccent)
+                                VStack(alignment: .leading) {
+                                    Text(recipe.title)
+                                        .font(.subheadline.weight(.medium))
+                                        .lineLimit(nil)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    if recipe.totalTime > 0 {
+                                        Text("\(recipe.totalTime) min")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
                             }
                         }
+                        .foregroundStyle(Color.rvInk)
+                        .listRowBackground(Color.rvPaper)
                     }
                 }
-                .foregroundStyle(Color.rvInk)
-                .listRowBackground(Color.rvPaper)
             }
             .scrollContentBackground(.hidden)
             .background(Color.rvBackground.ignoresSafeArea())

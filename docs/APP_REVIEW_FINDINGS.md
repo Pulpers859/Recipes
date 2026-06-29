@@ -95,24 +95,35 @@ Premium polish should therefore mean: stable navigation, visible save/delete out
 
 27. **Corrupt-store recovery UI added to Settings** — A new "Data Recovery" card in Settings lists archived databases from previous resets. Each archive can be exported as a JSON backup file via the standard share sheet, then re-imported through the normal import flow to restore recipes.
 
+### Medium Priority — Fixed (2026-06-28, third pass)
+
+28. **MealPlan entries now navigate to RecipeDetailView** — Tapping a meal plan entry opens the recipe detail. Entries for deleted recipes show dimmed text without a link.
+
+29. **MealPlan entries now support inline servings adjustment** — Stepper on each entry replaces delete-and-readd workflow. Changes save immediately.
+
+30. **PantryView now has visible delete button and quantity editing** — Each pantry row shows a trash button and a pencil button. Tapping pencil opens an alert to edit amount and unit inline.
+
+31. **Recipe picker shows empty search state** — When no recipes match the search or the library is empty, a clear message appears instead of a blank list.
+
+32. **CookingModeView confirms before closing with active timers** — Tapping Done while timers are running shows an alert explaining how many timers will be stopped.
+
+33. **Photo loading shows progress indicator** — A spinner and "Loading photos…" text appear while photos are being imported; the picker is disabled during load.
+
+34. **Photo ForEach now uses stable IDs** — Both RecipeEditorView and RecipeDetailView use `id: \.element` (Data's Hashable conformance) instead of array offset, preventing view recycling bugs on delete.
+
+35. **RecipeDetailView caches decoded images** — Photos are decoded from Data once and stored in a dictionary, avoiding re-decode on every SwiftUI body evaluation.
+
+36. **Fingerprint algorithms unified** — Conflict resolver now delegates to `RecipeLibraryMaintenance.fingerprint` (title + ingredients), eliminating the divergent title+sourceURL grouping. The sourceURL match is still used in `isConfidentDuplicate` to lower the overlap threshold.
+
+37. **Recipe UUID included in exports** — `ExportableRecipe` now includes `recipeID`. Import skips recipes whose UUID already exists in the library, enabling idempotent re-import. Export version bumped to 3; older backups import fine (UUID is optional).
+
+38. **Large JSON exports now warn about size** — Exports over 25 MB show the file size and a note that photos are embedded inline.
+
+39. **MealPlan recipeTitle synced on recipe rename** — `MealPlanningService.syncTitle(for:modelContext:)` updates denormalized titles in all plans whenever a recipe is saved.
+
+40. **CookingModeView uses Dynamic Type-compliant fonts** — Fixed-size navigation arrows and timer display replaced with `.system(.largeTitle)` text styles that scale with the user's accessibility settings.
+
 ## Remaining Known Issues (Not Fixed in This Review)
-
-### Medium Priority
-
-6. **MealPlan entries cannot navigate to recipe detail** — No tap-through from meal plan to RecipeDetailView.
-7. **MealPlan entries cannot adjust servings after adding** — Forces delete-and-readd.
-8. **PantryView has no inline delete affordance** — Context menu only; no swipe-to-delete.
-9. **PantryView has no way to edit item quantities** — Only add-new or mark-out.
-10. **Recipe picker has no empty search state** — Blank list when no recipes match.
-11. **CookingModeView: no confirmation when closing with active timers** — Timers silently destroyed.
-12. **Photo loading has no progress indicator** — Silent loading for large photos.
-13. **Photo thumbnails use array offset as ForEach ID** — Can cause view recycling bugs on delete.
-14. **RecipeDetailView decodes images from Data on every render** — No caching for full-size images.
-15. **Two different fingerprint algorithms for dedupe** — Import uses title+ingredients; conflict resolver uses title+sourceURL.
-16. **Recipe UUID not exported** — Re-import always creates duplicates.
-17. **RecipeExportService photos/PDFs encoded inline as Base64** — Memory-intensive for large libraries.
-18. **MealPlan denormalized recipeTitle never updated on recipe rename**.
-19. **CookingModeView fixed font sizes violate Dynamic Type**.
 
 ### Low Priority
 
@@ -148,11 +159,11 @@ Do not:
 
 ## Highest-Value Future Work
 
-1. Add per-recipe review step for multi-recipe PDF imports before saving.
-2. Add OCR-level multi-recipe splitting for scanned cookbooks.
-3. Add MealPlanView navigation to RecipeDetailView and servings editing.
-4. Add PantryView swipe-to-delete and quantity editing.
+1. ~~Add per-recipe review step for multi-recipe PDF imports before saving.~~ Done (#24).
+2. ~~Add OCR-level multi-recipe splitting for scanned cookbooks.~~ Done (#23).
+3. ~~Add MealPlanView navigation to RecipeDetailView and servings editing.~~ Done (#28, #29).
+4. ~~Add PantryView swipe-to-delete and quantity editing.~~ Done (#30).
 5. Add backup round-trip tests with old and current JSON fixtures.
-6. Include recipe UUID in exports for idempotent re-import.
+6. ~~Include recipe UUID in exports for idempotent re-import.~~ Done (#37).
 7. Split `RecipeListView` into list state/actions, hero/search/filter surfaces, and card rendering.
 8. Profile image thumbnail generation on real device libraries with many photos.

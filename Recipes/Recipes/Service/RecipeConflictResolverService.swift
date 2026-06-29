@@ -83,13 +83,7 @@ enum RecipeConflictResolverService {
     }
 
     private nonisolated static func fingerprint(_ recipe: Recipe) -> String {
-        let title = recipe.title
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-        let source = (recipe.sourceURL ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-        return "\(title)::\(source)"
+        RecipeLibraryMaintenance.fingerprint(for: recipe)
     }
     
     private nonisolated static func qualityScore(_ recipe: Recipe) -> Int {

@@ -15,10 +15,18 @@ struct RecipeDetailView: View {
     @State private var selectedPhotoIndex = 0
     @State private var showPhotoViewer = false
     @State private var actionErrorMessage: String?
+    @State private var decodedImages: [Data: UIImage] = [:]
 
     init(recipe: Recipe) {
         self.recipe = recipe
         self._targetServings = State(initialValue: recipe.servings)
+    }
+
+    private func cachedImage(for data: Data) -> UIImage? {
+        if let cached = decodedImages[data] { return cached }
+        guard let image = UIImage(data: data) else { return nil }
+        DispatchQueue.main.async { decodedImages[data] = image }
+        return image
     }
 
     var body: some View {
@@ -166,8 +174,8 @@ struct RecipeDetailView: View {
     private var photoSection: some View {
         if !recipe.photoData.isEmpty {
             TabView(selection: $selectedPhotoIndex) {
-                ForEach(Array(recipe.photoData.enumerated()), id: \.offset) { index, data in
-                    if let image = UIImage(data: data) {
+                ForEach(Array(recipe.photoData.enumerated()), id: \.element) { index, data in
+                    if let image = cachedImage(for: data) {
                         Image(uiImage: image)
                             .resizable()
                             .scaledToFill()

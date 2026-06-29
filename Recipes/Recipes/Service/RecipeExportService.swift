@@ -12,6 +12,7 @@ class RecipeExportService {
     static func exportAsJSON(recipes: [Recipe]) throws -> Data {
         let exportData = recipes.map { recipe -> ExportableRecipe in
             ExportableRecipe(
+                recipeID: recipe.id,
                 title: recipe.title,
                 summary: recipe.summary,
                 ingredients: recipe.ingredients,
@@ -37,7 +38,7 @@ class RecipeExportService {
         }
         
         let wrapper = ExportWrapper(
-            version: 2,
+            version: 3,
             exportDate: Date(),
             recipeCount: exportData.count,
             recipes: exportData
@@ -73,7 +74,7 @@ class RecipeExportService {
     }
 
     /// Current backup schema version produced by `exportAsJSON`.
-    static let currentBackupVersion = 2
+    static let currentBackupVersion = 3
 
     /// Import recipes from a JSON backup.
     ///
@@ -121,6 +122,9 @@ class RecipeExportService {
                 photoData: exp.photoData ?? [],
                 originalPDFData: exp.originalPDFData
             )
+            if let exportedID = exp.recipeID {
+                recipe.id = exportedID
+            }
             recipe.dateAdded = exp.dateAdded
             recipe.dateLastCooked = exp.dateLastCooked
             recipe.timesCooked = max(exp.timesCooked, 0)
@@ -391,6 +395,7 @@ enum ImportError: LocalizedError {
 }
 
 private struct ExportableRecipe: Codable {
+    var recipeID: UUID?
     let title: String
     let summary: String
     let ingredients: [Ingredient]

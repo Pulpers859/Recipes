@@ -69,10 +69,15 @@ enum RecipeLibraryMaintenance {
 
         let imported = try RecipeExportService.importFromJSON(data: data)
         var existingFingerprints = Set(existingRecipes.map(fingerprint))
+        let existingIDs = Set(existingRecipes.map(\.id))
         var insertedCount = 0
         var skippedCount = 0
 
         for recipe in imported {
+            if existingIDs.contains(recipe.id) {
+                skippedCount += 1
+                continue
+            }
             let key = fingerprint(for: recipe)
             if existingFingerprints.contains(key) {
                 skippedCount += 1
