@@ -45,6 +45,7 @@ struct SettingsView: View {
                     dataCard
                     maintenanceCard
                     analyticsCard
+                    recoveryCard
                     libraryCard
                     aboutCard
                 }
@@ -282,6 +283,124 @@ struct SettingsView: View {
             }
         }
         .rvCard()
+    }
+
+    private var recoveryCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            RVSectionTitle(
+                title: "Data Recovery",
+                subtitle: "If the app had to reset your library, archived copies of the old data may be available here."
+            )
+
+            let archives = Self.listArchivedStores()
+            if archives.isEmpty {
+                HStack(spacing: 10) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(Color.rvPrimary)
+                    Text("No recovery archives found — your library has not been reset.")
+                        .font(.subheadline)
+                        .foregroundStyle(Color.rvSubtleText)
+                }
+            } else {
+                RVStatusBanner(
+                    message: "\(archives.count) archived database\(archives.count == 1 ? "" : "s") found from previous resets. These contain your old recipes and can be exported as a backup file for re-import.",
+                    tone: .info
+                )
+
+                ForEach(archives, id: \.timestamp) { archive in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Archive from \(archive.displayDate)")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(Color.rvInk)
+                            Text(archive.sizeText)
+                                .font(.caption)
+                                .foregroundStyle(Color.rvSubtleText)
+                        }
+                        Spacer()
+                        Button("Export") {
+                            exportArchivedStore(archive)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Color.rvAccent)
+                        .controlSize(.small)
+                    }
+                }
+            }
+        }
+        .rvCard()
+    }
+
+    private struct ArchivedStore {
+        let timestamp: Int
+        let path: URL
+        var displayDate: String {
+            let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
+            let formatter = DateFormatter()
+            formatter.dateStyle = .medium
+            formatter.timeStyle = .short
+            return formatter.string(from: date)
+        }
+        var sizeText: String {
+            let size = (try? FileManager.default.attributesOfItem(atPath: path.path)[.size] as? Int) ?? 0
+            if size > 1_000_000 {
+                return String(format: "%.1f MB", Double(size) / 1_000_000)
+            }
+            return "\(size / 1_000) KB"
+        }
+    }
+
+    private static func listArchivedStores() -> [ArchivedStore] {
+        let fm = FileManager.default
+        guard let supportDir = try? fm.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: false
+        ) else { return [] }
+
+        let contents = (try? fm.contentsOfDirectory(at: supportDir, includingPropertiesForKeys: nil)) ?? []
+        let storeRegex = try? NSRegularExpression(pattern: #"RecipeVault-corrupt-(\d+)\.store$"#)
+
+        return contents.compactMap { url in
+            let name = url.lastPathComponent
+            let range = NSRange(name.startIndex..., in: name)
+            guard let match = storeRegex?.firstMatch(in: name, range: range),
+                  let tsRange = Range(match.range(at: 1), in: name),
+                  let ts = Int(name[tsRange]) else { return nil }
+            return ArchivedStore(timestamp: ts, path: url)
+        }
+        .sorted { $0.timestamp > $1.timestamp }
+    }
+
+    private func exportArchivedStore(_ archive: ArchivedStore) {
+        do {
+            let schema = Schema([Recipe.self, MealPlan.self, ShoppingItem.self, PantryItem.self])
+            let config = ModelConfiguration(
+                "RecoveryRead",
+                schema: schema,
+                url: archive.path,
+                cloudKitDatabase: .none
+            )
+            let container = try ModelContainer(for: schema, configurations: config)
+            let context = ModelContext(container)
+            let recipes = (try? context.fetch(FetchDescriptor<Recipe>())) ?? []
+
+            if recipes.isEmpty {
+                exportMessage = "The archived database could not be read or contains no recipes."
+                return
+            }
+
+            let jsonData = try RecipeExportService.exportAsJSON(recipes: recipes)
+            let tempURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("RecipeVault-Recovery-\(archive.timestamp).json")
+            try jsonData.write(to: tempURL)
+            shareURL = tempURL
+            showShareSheet = true
+            exportMessage = "Exported \(recipes.count) recipes from the archive. Re-import this file to restore them."
+        } catch {
+            exportMessage = "Could not read archived database: \(error.localizedDescription)"
+        }
     }
 
     private var aboutCard: some View {

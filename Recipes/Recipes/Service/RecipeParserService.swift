@@ -49,74 +49,80 @@ class RecipeParserService: ObservableObject {
         parseProgress = "Extracting text from PDF..."
         let pageTexts = try extractTextByPage(from: pdfData)
         
-        // If no selectable text, try OCR
+        // If no selectable text, try OCR — per page so multi-recipe
+        // splitting still works on scanned cookbooks.
         let allText = pageTexts.joined(separator: "\n")
         if allText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             parseProgress = "No selectable text. Running OCR..."
-            let ocrText = try await ocrFromPDF(data: pdfData)
-            let recipe = try await parseSingleText(ocrText, pdfData: pdfData, mode: mode)
-            return [recipe]
+            let ocrPageTexts = try await ocrFromPDFByPage(data: pdfData)
+            let ocrAllText = ocrPageTexts.joined(separator: "\n")
+            if ocrAllText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                throw ParserError.ocrFailed
+            }
+            // Feed per-page OCR text through the same splitting logic used for
+            // selectable-text PDFs, so scanned cookbooks are handled the same way.
+            let ocrChunks = splitIntoRecipeChunks(pageTexts: ocrPageTexts)
+            if ocrChunks.count <= 1 {
+                let recipe = try await parseSingleText(ocrAllText, pdfData: pdfData, mode: mode)
+                return [recipe]
+            }
+            // Fall through to the multi-recipe path below by replacing pageTexts.
+            // We reassign to a local var since the original is let-bound.
+            return try await parseMultipleChunks(ocrChunks, pdfData: pdfData, mode: mode)
         }
         
         // Step 2: Detect if this is a multi-recipe document
         let recipeChunks = splitIntoRecipeChunks(pageTexts: pageTexts)
-        
-        parseProgress = "Found \(recipeChunks.count) recipe(s)..."
-        
+
         if recipeChunks.count <= 1 {
-            // Single recipe — use existing flow
             let recipe = try await parseSingleText(allText, pdfData: pdfData, mode: mode)
             return [recipe]
         }
-        
-        // Step 3: Parse each chunk
+
+        return try await parseMultipleChunks(recipeChunks, pdfData: pdfData, mode: mode)
+    }
+
+    // MARK: - Multi-Chunk Parsing
+
+    @MainActor
+    private func parseMultipleChunks(_ chunks: [String], pdfData: Data?, mode: ParseMode) async throws -> [Recipe] {
+        parseProgress = "Found \(chunks.count) recipe(s)..."
+
         var recipes: [Recipe] = []
         var failedChunks: [String] = []
-        for (index, chunk) in recipeChunks.enumerated() {
-            parseProgress = "Parsing recipe \(index + 1) of \(recipeChunks.count)..."
-
+        for (index, chunk) in chunks.enumerated() {
+            parseProgress = "Parsing recipe \(index + 1) of \(chunks.count)..."
             do {
                 let recipe = try await parseSingleText(chunk, pdfData: nil, mode: mode)
                 recipes.append(recipe)
             } catch {
-                // If one recipe fails, continue with the rest — but remember the
-                // chunk so a partial failure can be retried via batch AI below,
-                // instead of being silently lost.
                 failedChunks.append(chunk)
             }
         }
 
-        // Retry ONLY the chunks that failed via batch AI (when available), so a
-        // cookbook where some sections parse and others don't doesn't quietly
-        // drop most of its recipes. Re-batching every chunk would duplicate the
-        // ones that already succeeded, so we feed it just the failures.
         if !failedChunks.isEmpty && hasAPIKey {
             parseProgress = "Retrying \(failedChunks.count) section(s) with batch AI extraction..."
             if let recovered = try? await aiBatchParse(chunks: failedChunks, pdfData: nil) {
                 recipes.append(contentsOf: recovered)
                 let stillMissing = failedChunks.count - recovered.count
                 if stillMissing > 0 {
-                    lastError = "Skipped \(stillMissing) of \(recipeChunks.count) detected recipe sections that couldn't be parsed."
+                    lastError = "Skipped \(stillMissing) of \(chunks.count) detected recipe sections that couldn't be parsed."
                 }
             } else {
-                lastError = "Skipped \(failedChunks.count) of \(recipeChunks.count) detected recipe sections that couldn't be parsed."
+                lastError = "Skipped \(failedChunks.count) of \(chunks.count) detected recipe sections that couldn't be parsed."
             }
         } else if !failedChunks.isEmpty {
-            lastError = "Skipped \(failedChunks.count) of \(recipeChunks.count) detected recipe sections that couldn't be parsed."
+            lastError = "Skipped \(failedChunks.count) of \(chunks.count) detected recipe sections that couldn't be parsed."
         }
 
         if recipes.isEmpty {
             throw ParserError.parseError("Could not extract any recipes from the document")
         }
-        
-        // Store original PDF on the first recipe
-        if !recipes.isEmpty {
-            recipes[0].originalPDFData = pdfData
-        }
-        
+
+        recipes[0].originalPDFData = pdfData
         return recipes
     }
-    
+
     /// Parse a single recipe from an image
     @MainActor
     func parseRecipeFromImage(_ imageData: Data, mode: ParseMode = .auto) async throws -> Recipe {
@@ -266,8 +272,18 @@ class RecipeParserService: ObservableObject {
         - Return ONLY valid JSON, no other text
         """
         
-        let truncatedText = String(text.prefix(12000))
-        
+        let maxChars = 12000
+        let truncatedText = String(text.prefix(maxChars))
+        if text.count > maxChars {
+            await MainActor.run {
+                let pct = Int(Double(maxChars) / Double(text.count) * 100)
+                parseProgress = "Text truncated to \(pct)% for AI — review the result carefully."
+                if lastError == nil {
+                    lastError = "The recipe text was too long (\(text.count) characters) and was trimmed to \(maxChars) for AI parsing. Some ingredients or steps at the end may be missing."
+                }
+            }
+        }
+
         let requestBody: [String: Any] = [
             "model": modelID,
             "max_tokens": 4000,
@@ -293,10 +309,22 @@ class RecipeParserService: ObservableObject {
     private func aiBatchParse(chunks: [String], pdfData: Data?) async throws -> [Recipe] {
         parseProgress = "Batch extracting \(chunks.count) recipes with AI..."
         
-        // Send all chunks in one request for efficiency
+        // Budget per chunk scales with count so the total stays within the
+        // context window (~100k tokens ≈ ~400k chars). Each recipe rarely
+        // exceeds 6k chars of useful text even in verbose cookbooks.
+        let perChunkLimit = min(8000, max(3000, 40000 / max(chunks.count, 1)))
+        var anyTruncated = false
         let allChunksText = chunks.enumerated().map { index, chunk in
-            "=== RECIPE \(index + 1) ===\n\(String(chunk.prefix(3000)))"
+            if chunk.count > perChunkLimit { anyTruncated = true }
+            return "=== RECIPE \(index + 1) ===\n\(String(chunk.prefix(perChunkLimit)))"
         }.joined(separator: "\n\n")
+        if anyTruncated {
+            await MainActor.run {
+                if lastError == nil {
+                    lastError = "Some recipe sections were trimmed for batch AI parsing. Review the results for missing content."
+                }
+            }
+        }
         
         let systemPrompt = """
         You are a recipe extraction assistant. The text contains MULTIPLE recipes separated by "=== RECIPE N ===" markers. Extract ALL recipes and return ONLY a JSON array (no markdown, no backticks):
@@ -402,29 +430,55 @@ class RecipeParserService: ObservableObject {
     // MARK: - OCR
     
     private func ocrFromPDF(data: Data) async throws -> String {
+        let pages = try await ocrFromPDFByPage(data: data)
+        return pages.joined(separator: "\n\n")
+    }
+
+    private func ocrFromPDFByPage(data: Data) async throws -> [String] {
         guard let document = PDFDocument(data: data) else {
             throw ParserError.invalidPDF
         }
-        
-        var allText = ""
-        for i in 0..<min(document.pageCount, 20) {
-            if let page = document.page(at: i) {
-                let bounds = page.bounds(for: .mediaBox)
-                let renderer = UIGraphicsImageRenderer(size: bounds.size)
-                let image = renderer.image { ctx in
-                    UIColor.white.setFill()
-                    ctx.fill(bounds)
-                    ctx.cgContext.translateBy(x: 0, y: bounds.height)
-                    ctx.cgContext.scaleBy(x: 1, y: -1)
-                    page.draw(with: .mediaBox, to: ctx.cgContext)
-                }
-                if let cgImage = image.cgImage {
-                    let pageText = try await recognizeText(in: cgImage)
-                    allText += pageText + "\n\n"
+
+        let pageCount = min(document.pageCount, 20)
+        if document.pageCount > 20 {
+            await MainActor.run {
+                let skipped = document.pageCount - 20
+                parseProgress = "Only scanning the first 20 of \(document.pageCount) pages (\(skipped) skipped)."
+                if lastError == nil {
+                    lastError = "This PDF has \(document.pageCount) pages but only the first 20 were scanned. The remaining \(skipped) pages were skipped."
                 }
             }
         }
-        return allText
+
+        var pageTexts: [String] = []
+        for i in 0..<pageCount {
+            let pageText: String = try await {
+                guard let page = document.page(at: i) else { return "" }
+                let bounds = page.bounds(for: .mediaBox)
+                // Cap rendering at 150 DPI — sufficient for OCR and avoids
+                // blowing memory on large-format pages.
+                let maxDim: CGFloat = 2000
+                let scale = min(maxDim / max(bounds.width, 1), maxDim / max(bounds.height, 1), 1.0)
+                let renderSize = CGSize(width: bounds.width * scale, height: bounds.height * scale)
+
+                let cgImage: CGImage? = autoreleasepool {
+                    let renderer = UIGraphicsImageRenderer(size: renderSize)
+                    let image = renderer.image { ctx in
+                        UIColor.white.setFill()
+                        ctx.fill(CGRect(origin: .zero, size: renderSize))
+                        ctx.cgContext.scaleBy(x: scale, y: scale)
+                        ctx.cgContext.translateBy(x: 0, y: bounds.height)
+                        ctx.cgContext.scaleBy(x: 1, y: -1)
+                        page.draw(with: .mediaBox, to: ctx.cgContext)
+                    }
+                    return image.cgImage
+                }
+                guard let cg = cgImage else { return "" }
+                return try await recognizeText(in: cg)
+            }()
+            pageTexts.append(pageText)
+        }
+        return pageTexts
     }
     
     private func ocrFromImage(data: Data) async throws -> String {
@@ -469,11 +523,20 @@ class RecipeParserService: ObservableObject {
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
 
-        let title = lines.first ?? "Imported Recipe"
+        let title = lines.first(where: { line in
+            let t = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if t.count < 3 { return false }
+            if t.allSatisfy({ $0.isNumber || $0.isWhitespace }) { return false }
+            let lower = t.lowercased()
+            if lower == "table of contents" || lower == "contents" || lower == "index" { return false }
+            return true
+        }) ?? "Imported Recipe"
 
         let measurementPattern = #"(\d+[\./]?\d*|[¼½¾⅓⅔⅛⅜⅝⅞])\s*(cup|cups|tbsp|tsp|tablespoon|teaspoon|oz|ounce|lb|lbs|pound|g|gram|kg|ml|l|pinch|clove|cloves|can|cans|package|bunch|stick|sticks|piece|pieces|slices?)s?\b"#
         let measurementRegex = try? NSRegularExpression(pattern: measurementPattern, options: .caseInsensitive)
         let numberedStepRegex = try? NSRegularExpression(pattern: #"^(\d+[\.\)]\s+|step\s+\d+)"#, options: .caseInsensitive)
+        let actionVerbPattern = #"(?i)^(heat|preheat|boil|simmer|bake|roast|fry|saute|sauté|grill|broil|steam|stir|whisk|mix|combine|blend|chop|dice|mince|slice|cut|peel|drain|rinse|add|pour|place|put|set|spread|layer|serve|garnish|toss|fold|cook|season|marinate|soak|reduce|bring|let|cover|remove|transfer|arrange|brush|coat|wrap|roll|shape|form|knead|rise|rest|cool|chill|refrigerate|freeze|thaw|melt|dissolve|beat|cream|sift|measure|line|grease|spray|in a|using a|take|make|prepare|meanwhile|once|when|after|before|while|carefully|gently|slowly|quickly|immediately|finally|next|then)\b"#
+        let actionVerbRegex = try? NSRegularExpression(pattern: actionVerbPattern, options: .caseInsensitive)
 
         var ingredients: [Ingredient] = []
         var stepLines: [String] = []
@@ -512,9 +575,7 @@ class RecipeParserService: ObservableObject {
                 } else if looksNumberedStep {
                     section = .steps
                     stepLines.append(stripStepNumber(from: line))
-                } else if line.hasSuffix(".") || line.count > 60 {
-                    // Sentence-like lines after the ingredient list are almost
-                    // always instructions even without a header.
+                } else if looksLikeInstruction(line, actionVerbRegex: actionVerbRegex) {
                     section = .steps
                     stepLines.append(line)
                 } else {
@@ -547,6 +608,30 @@ class RecipeParserService: ObservableObject {
             notes: "Imported with the basic local parser — double-check ingredients and steps.\n\nOriginal text:\n\(String(text.prefix(2000)))",
             originalPDFData: pdfData
         )
+    }
+
+    /// A line in the ingredients section should only be promoted to a step
+    /// when it genuinely reads like an instruction — not just because it's
+    /// long or ends with a period. Ingredient lines like "1 28-oz can San
+    /// Marzano whole peeled tomatoes, drained and crushed" are long and may
+    /// end with a period, but they are not instructions.
+    private func looksLikeInstruction(_ line: String, actionVerbRegex: NSRegularExpression?) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > 30 else { return false }
+
+        let range = NSRange(trimmed.startIndex..., in: trimmed)
+        let startsWithVerb = actionVerbRegex?.firstMatch(in: trimmed, range: range) != nil
+
+        // Multiple complete sentences are a strong signal for instructions.
+        let sentenceCount = trimmed.components(separatedBy: ". ")
+            .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            .count
+
+        if startsWithVerb && sentenceCount >= 2 { return true }
+        if startsWithVerb && trimmed.count > 100 { return true }
+        if sentenceCount >= 3 { return true }
+
+        return false
     }
 
     private func stripStepNumber(from line: String) -> String {

@@ -17,6 +17,8 @@ struct ImportView: View {
     @StateObject private var scraper = URLRecipeScraperService()
     @State private var showImportSummary = false
     @State private var importedCount = 0
+    @State private var pendingBatchRecipes: [Recipe] = []
+    @State private var showBatchReview = false
     @AppStorage("parse_mode") private var parseModeSetting = "auto"
     
     private let maxPDFImportBytes = 25 * 1024 * 1024
@@ -90,12 +92,28 @@ struct ImportView: View {
                     RecipeEditorView(recipe: recipe, isNewImport: true)
                 }
             }
+            .sheet(isPresented: $showBatchReview) {
+                BatchImportReviewView(
+                    recipes: $pendingBatchRecipes,
+                    parserWarning: parser.lastError
+                ) { accepted in
+                    for recipe in accepted {
+                        modelContext.insert(recipe)
+                    }
+                    do {
+                        try modelContext.save()
+                    } catch {
+                        parser.lastError = "Could not save imported recipes: \(error.localizedDescription)"
+                        return
+                    }
+                    importedCount = accepted.count
+                    showImportSummary = true
+                }
+            }
             .alert("Import Complete", isPresented: $showImportSummary) {
                 Button("OK") { dismiss() }
             } message: {
-                // Multi-recipe splitting is heuristic; say so instead of
-                // implying every recipe came through cleanly.
-                Text("Imported \(importedCount) recipes from this PDF. Splitting a multi-recipe PDF is approximate — open each recipe in the Recipes tab and check that nothing was merged or cut off.")
+                Text("Imported \(importedCount) recipe\(importedCount == 1 ? "" : "s"). Open each one in the Recipes tab to verify the content.")
             }
         }
     }
@@ -353,21 +371,17 @@ struct ImportView: View {
                 let mode = parseMode()
                 let recipes = try await parser.parseRecipes(from: data, mode: mode)
                 await MainActor.run {
-                    for recipe in recipes {
-                        modelContext.insert(recipe)
-                    }
                     AnalyticsService.shared.track("import_pdf_success", metadata: [
                         "count": "\(recipes.count)",
                         "mode": parseModeSetting
                     ])
 
                     if recipes.count == 1 {
-                        // Single recipe — open editor for review
+                        modelContext.insert(recipes[0])
                         importedRecipe = recipes.first
                     } else {
-                        // Multiple recipes — show summary
-                        importedCount = recipes.count
-                        showImportSummary = true
+                        pendingBatchRecipes = recipes
+                        showBatchReview = true
                     }
                 }
             } catch {
@@ -464,5 +478,119 @@ struct PDFImportDocumentPicker: UIViewControllerRepresentable {
             }
             onPick(firstURL)
         }
+    }
+}
+
+// MARK: - Batch Import Review
+
+struct BatchImportReviewView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var recipes: [Recipe]
+    let parserWarning: String?
+    let onAccept: ([Recipe]) -> Void
+
+    @State private var selectedRecipe: Recipe?
+    @State private var excluded: Set<UUID> = []
+
+    private var accepted: [Recipe] {
+        recipes.filter { !excluded.contains($0.id) }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: RVDesign.sectionSpacing) {
+                    RVHeroBanner(
+                        title: "Review Import",
+                        subtitle: "Multi-recipe splitting is approximate. Check each recipe and remove any that look wrong before saving.",
+                        systemImage: "checklist",
+                        metrics: [
+                            ("Found", "\(recipes.count)"),
+                            ("Keeping", "\(accepted.count)")
+                        ]
+                    )
+
+                    if let warning = parserWarning {
+                        RVStatusBanner(message: warning, tone: .warning)
+                    }
+
+                    ForEach(recipes) { recipe in
+                        batchRecipeRow(recipe)
+                    }
+                }
+                .padding(RVDesign.screenPadding)
+                .padding(.bottom, 28)
+            }
+            .background(Color.rvBackground.ignoresSafeArea())
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save \(accepted.count) Recipe\(accepted.count == 1 ? "" : "s")") {
+                        onAccept(accepted)
+                        dismiss()
+                    }
+                    .disabled(accepted.isEmpty)
+                }
+            }
+            .sheet(item: $selectedRecipe) { recipe in
+                NavigationStack {
+                    RecipeEditorView(recipe: recipe, isNewImport: true)
+                }
+            }
+        }
+    }
+
+    private func batchRecipeRow(_ recipe: Recipe) -> some View {
+        let isExcluded = excluded.contains(recipe.id)
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(recipe.title)
+                        .font(.headline)
+                        .foregroundStyle(isExcluded ? Color.rvMuted : Color.rvInk)
+                        .strikethrough(isExcluded)
+
+                    Text("\(recipe.ingredients.count) ingredients · \(recipe.steps.count) steps")
+                        .font(.caption)
+                        .foregroundStyle(Color.rvSubtleText)
+                }
+
+                Spacer()
+
+                HStack(spacing: 12) {
+                    Button {
+                        selectedRecipe = recipe
+                    } label: {
+                        Image(systemName: "eye")
+                            .foregroundStyle(Color.rvAccent)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        if isExcluded {
+                            excluded.remove(recipe.id)
+                        } else {
+                            excluded.insert(recipe.id)
+                        }
+                    } label: {
+                        Image(systemName: isExcluded ? "arrow.uturn.backward.circle" : "xmark.circle.fill")
+                            .foregroundStyle(isExcluded ? Color.rvAccent : Color.rvMuted)
+                            .font(.title3)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            if recipe.ingredients.isEmpty && recipe.steps.isEmpty {
+                RVStatusBanner(message: "This recipe has no ingredients or steps — it may not have parsed correctly.", tone: .warning)
+            }
+        }
+        .rvCard()
+        .opacity(isExcluded ? 0.5 : 1)
     }
 }

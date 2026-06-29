@@ -83,19 +83,19 @@ Premium polish should therefore mean: stable navigation, visible save/delete out
 
 22. **Hardcoded version "1.0.0"** — Now reads from Bundle.main.
 
+### Fixed in Follow-up (2026-06-28, second pass)
+
+23. **OCR path now splits into recipe chunks** — Scanned cookbooks use per-page OCR and feed through the same splitting logic as selectable-text PDFs. Also adds memory safety via `autoreleasepool` and caps rendering at 150 DPI. Warns when PDFs exceed 20 pages.
+
+24. **Multi-recipe PDF imports now go through batch review** — Recipes are NOT inserted into the database until the user reviews them. A new `BatchImportReviewView` shows each recipe with ingredient/step counts, lets the user exclude bad splits, preview each recipe in the editor, and save only the accepted ones.
+
+25. **Manual parser no longer misclassifies long ingredients as steps** — Replaced the aggressive `line.count > 60 || line.hasSuffix(".")` heuristic with an `looksLikeInstruction` check that requires action verbs + sentence structure. Lines like "1 28-oz can San Marzano whole peeled tomatoes, drained and crushed" now stay as ingredients. Also improved title extraction to skip page numbers and boilerplate.
+
+26. **AI truncation now warns the user** — When text exceeds the 12,000-char single-recipe limit, the user sees exactly what percentage was trimmed and a warning that content may be missing. Batch per-chunk limits increased from 3,000 to a dynamic budget (up to 8,000 per chunk, scaling with chunk count).
+
+27. **Corrupt-store recovery UI added to Settings** — A new "Data Recovery" card in Settings lists archived databases from previous resets. Each archive can be exported as a JSON backup file via the standard share sheet, then re-imported through the normal import flow to restore recipes.
+
 ## Remaining Known Issues (Not Fixed in This Review)
-
-### High Priority
-
-1. **OCR path skips multi-recipe splitting** — Scanned cookbooks always produce one recipe. Needs per-page OCR + splitting logic.
-
-2. **Multi-recipe PDF imports saved without review** — All recipes inserted immediately with no per-recipe review step. Should defer insert or flag as pending review.
-
-3. **Manual parser misclassifies long ingredient lines as steps** — Lines > 60 chars or ending with "." are reclassified. Needs smarter heuristics.
-
-4. **AI truncation is silent** — Single recipe: 12,000 chars; batch: 3,000 chars. No warning to user when content is truncated.
-
-5. **Corrupt-store recovery wipes library with no in-app restore** — Archives exist on disk but no UI to browse/restore them.
 
 ### Medium Priority
 
