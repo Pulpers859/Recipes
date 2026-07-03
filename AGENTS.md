@@ -6,6 +6,7 @@ Recipe Vault is a small SwiftUI + SwiftData iOS app. Optimize for recipe correct
 
 - Work only on `main` tracking `origin/main`.
 - Do not use `dev`, PR branches, feature branches, side branches, or temporary reconciliation branches unless Patrick explicitly asks for one in the current conversation.
+- For risky, creative, or parallel agent work, use a detached sandbox worktree via `tools/New-AgentSandbox.ps1`; do not create side branches or commit/push from the sandbox. See `docs/agent-sandbox-workflow.md`.
 - If you start on any non-main branch, stop before editing, switch to `main`, fetch, and fast-forward from `origin/main`.
 - Commit completed tracked changes directly on `main` and push to `origin/main`.
 - Do not create or recreate hooks that block direct commits to `main`.
@@ -54,6 +55,7 @@ Recipe Vault is a small SwiftUI + SwiftData iOS app. Optimize for recipe correct
 ## Avoid
 
 - Working from `dev` or any side branch.
+- Committing or pushing from a detached agent sandbox.
 - PR-first workflows for normal work.
 - Hidden auto-commits, hidden auto-pushes, or mutating hooks.
 - Broad architecture churn without a specific product-quality payoff.

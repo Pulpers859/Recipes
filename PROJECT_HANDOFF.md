@@ -13,7 +13,7 @@
 - Stable branch: `main`
 - Working branch: `main`
 - Expected default branch for all normal work: `main`
-- Branch law: `Work only on origin/main. Do not use dev, PR branches, feature branches, side branches, or temporary reconciliation branches for normal work unless Patrick explicitly asks for one in the current conversation. All investigation, edits, commits, and pushes should happen on main after syncing origin/main.`
+- Branch law: `Work only on origin/main. Do not use dev, PR branches, feature branches, side branches, or temporary reconciliation branches for normal work unless Patrick explicitly asks for one in the current conversation. Detached sandbox worktrees via tools/New-AgentSandbox.ps1 are allowed for risky AI-agent experiments, but final investigation, edits, commits, and pushes should happen on main after syncing origin/main.`
 - Sync-first rule: `Before normal work, fetch from the remote first. If the working tree is clean and the active branch tracks the expected upstream, pull with --ff-only before editing. If local changes exist, fetch and reconcile instead of blindly pulling.`
 - Current observed local state: `C:\Dev\Recipes is the live Git repo. origin/main is the source-of-truth branch and current GitHub default. Any dev branch is historical/stale unless Patrick explicitly says otherwise. The Desktop/OneDrive copy should be treated as stale unless explicitly needed for recovery.`
 - Git bootstrap status: `completed locally with repo config and aliases. Do not install hooks that block commits to main; this project intentionally commits and pushes directly on main.`
