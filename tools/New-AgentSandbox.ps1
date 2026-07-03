@@ -13,7 +13,8 @@ $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $repoName = Split-Path -Leaf $repoRoot
 
 if (-not $WorktreeRoot) {
-    $WorktreeRoot = Join-Path (Split-Path -Parent $repoRoot) "$repoName-agent-sandboxes"
+    $sandboxRoot = Join-Path (Split-Path -Parent $repoRoot) '.agent-sandboxes'
+    $WorktreeRoot = Join-Path $sandboxRoot $repoName
 }
 
 function ConvertTo-Slug {

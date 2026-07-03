@@ -15,7 +15,7 @@ For risky experiments, create a detached worktree:
 Review the sandbox diff, then integrate only selected changes back into the main checkout:
 
 ```powershell
-git -C C:\Dev\Recipes-agent-sandboxes\import-safety diff
+git -C C:\Dev\.agent-sandboxes\Recipes\import-safety diff
 ```
 
 Remove the sandbox when finished:
