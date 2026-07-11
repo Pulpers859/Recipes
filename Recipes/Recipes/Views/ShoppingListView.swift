@@ -69,6 +69,7 @@ struct ShoppingListView: View {
                 .padding()
                 .padding(.bottom, 28)
             }
+            .scrollDismissesKeyboard(.onDrag)
             .background(Color.rvBackground.ignoresSafeArea())
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
@@ -111,18 +112,19 @@ struct ShoppingListView: View {
     }
 
     private var heroHeader: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Shopping List")
-                .font(.system(.largeTitle, design: .serif, weight: .bold))
-                .foregroundStyle(Color.rvInk)
-
-            Text("A cleaner market run: quantity up front, recipe context underneath, pantry-aware totals throughout.")
-                .font(.subheadline)
-                .foregroundStyle(Color.rvSubtleText)
-
+        RVHeroBanner(
+            title: "Shopping List",
+            subtitle: "Everything you still need to buy, organized by aisle and adjusted for what your pantry already covers.",
+            systemImage: "cart.fill",
+            metrics: [
+                ("Remaining", "\(remainingCount)"),
+                ("Picked Up", "\(checkedCount)"),
+                ("Pantry Adjusted", "\(pantryAdjustedCount)")
+            ]
+        ) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Text("\(checkedCount) of \(totalCount) items picked up")
+                    Text("\(checkedCount) of \(totalCount) \(totalCount == 1 ? "item" : "items") picked up")
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(Color.rvInk)
                     Spacer()
@@ -133,27 +135,13 @@ struct ShoppingListView: View {
 
                 ProgressView(value: Double(checkedCount), total: Double(max(totalCount, 1)))
                     .tint(Color.rvAccent)
-            }
 
-            HStack(spacing: 10) {
-                summaryPill(title: "Remaining", value: "\(remainingCount)")
-                summaryPill(title: "Picked Up", value: "\(checkedCount)")
-                summaryPill(title: "Pantry Adjusted", value: "\(pantryAdjustedCount)")
+                if pantryAdjustedCount > 0 || generatedCount > 0 {
+                    Text(heroSupportLine)
+                        .font(.caption)
+                        .foregroundStyle(Color.rvSubtleText)
+                }
             }
-
-            if pantryAdjustedCount > 0 || generatedCount > 0 {
-                Text(heroSupportLine)
-                    .font(.caption)
-                    .foregroundStyle(Color.rvSubtleText)
-            }
-        }
-        .padding(22)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(LinearGradient.rvHeroGradient)
-        .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 30, style: .continuous)
-                .stroke(Color.white.opacity(0.6), lineWidth: 1)
         }
     }
 
@@ -331,6 +319,20 @@ struct ShoppingListView: View {
                     .foregroundStyle(Color.rvInk)
             }
             .buttonStyle(.plain)
+
+            // Visible delete, matching the pantry rows — deletion must not
+            // hide behind a long-press only.
+            Button(role: .destructive) {
+                deleteItem(item)
+            } label: {
+                Image(systemName: "trash")
+                    .font(.subheadline)
+                    .foregroundStyle(.red.opacity(0.7))
+                    .frame(minWidth: 32, minHeight: 36)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Delete \(item.name)")
         }
         .padding(16)
         .background(item.isChecked ? Color.rvSurface.opacity(0.9) : Color.rvPaper)
@@ -341,13 +343,17 @@ struct ShoppingListView: View {
         }
         .contextMenu {
             Button(role: .destructive) {
-                modelContext.delete(item)
-                saveChanges(failureMessage: "Could not delete this item")
-                AnalyticsService.shared.track("shopping_item_deleted")
+                deleteItem(item)
             } label: {
                 Label("Delete Item", systemImage: "trash")
             }
         }
+    }
+
+    private func deleteItem(_ item: ShoppingItem) {
+        modelContext.delete(item)
+        guard saveChanges(failureMessage: "Could not delete this item") else { return }
+        AnalyticsService.shared.track("shopping_item_deleted")
     }
 
     private func quantityBadge(for item: ShoppingItem) -> some View {
@@ -362,21 +368,6 @@ struct ShoppingListView: View {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .stroke(Color.rvSecondary.opacity(0.6), lineWidth: 1)
             }
-    }
-
-    private func summaryPill(title: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title.uppercased())
-                .font(.caption2.weight(.bold))
-                .tracking(0.8)
-                .foregroundStyle(Color.rvSubtleText)
-            Text(value)
-                .font(.headline)
-                .foregroundStyle(Color.rvInk)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(Color.rvPaper.opacity(0.88), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private var heroSupportLine: String {

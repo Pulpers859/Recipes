@@ -109,11 +109,26 @@ extension View {
 
 // MARK: - Shared Components
 
-struct RVHeroBanner: View {
+struct RVHeroBanner<Footer: View>: View {
     let title: String
     let subtitle: String
     let systemImage: String
-    var metrics: [(title: String, value: String)] = []
+    let metrics: [(title: String, value: String)]
+    private let footer: Footer
+
+    init(
+        title: String,
+        subtitle: String,
+        systemImage: String,
+        metrics: [(title: String, value: String)] = [],
+        @ViewBuilder footer: () -> Footer
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.systemImage = systemImage
+        self.metrics = metrics
+        self.footer = footer()
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -147,6 +162,8 @@ struct RVHeroBanner: View {
                     }
                 }
             }
+
+            footer
         }
         .padding(22)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -155,6 +172,19 @@ struct RVHeroBanner: View {
         .overlay {
             RoundedRectangle(cornerRadius: RVDesign.heroRadius, style: .continuous)
                 .stroke(Color.white.opacity(0.62), lineWidth: 1)
+        }
+    }
+}
+
+extension RVHeroBanner where Footer == EmptyView {
+    init(
+        title: String,
+        subtitle: String,
+        systemImage: String,
+        metrics: [(title: String, value: String)] = []
+    ) {
+        self.init(title: title, subtitle: subtitle, systemImage: systemImage, metrics: metrics) {
+            EmptyView()
         }
     }
 }

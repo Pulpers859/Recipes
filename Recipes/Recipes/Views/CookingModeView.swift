@@ -55,7 +55,10 @@ struct CookingModeView: View {
                     } label: {
                         Image(systemName: "list.bullet")
                             .foregroundStyle(.white)
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
                     }
+                    .accessibilityLabel(showIngredients ? "Hide ingredients" : "Show ingredients")
                 }
                 .padding()
                 

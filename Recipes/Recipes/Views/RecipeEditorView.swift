@@ -526,9 +526,11 @@ struct RecipeEditorView: View {
                 Image(systemName: "xmark.circle.fill")
                     .font(.title3)
                     .foregroundStyle(.white, Color.black.opacity(0.55))
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
             }
             .accessibilityLabel("Delete photo \(index + 1)")
-            .offset(x: 6, y: -6)
+            .offset(x: 10, y: -10)
         }
     }
     

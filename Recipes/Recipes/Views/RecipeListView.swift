@@ -134,6 +134,7 @@ struct RecipeListView: View {
                     recipeListContent
                 }
             }
+            .scrollDismissesKeyboard(.onDrag)
             .background(Color.rvBackground.ignoresSafeArea())
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
@@ -149,9 +150,6 @@ struct RecipeListView: View {
                     .accessibilityLabel("Add recipe manually")
                 }
 
-                ToolbarItem(placement: .secondaryAction) {
-                    filterMenu
-                }
             }
             .sheet(isPresented: $showingAddRecipe) {
                 NavigationStack {
@@ -255,7 +253,7 @@ struct RecipeListView: View {
                             .font(.system(.title2, design: .serif, weight: .bold))
                             .foregroundStyle(Color.rvInk)
 
-                        Text("Import recipes from PDFs, photos, or the web, then organize them with the pantry, meal plan, and shopping tools you already built.")
+                        Text("Import recipes from PDFs, photos, or the web — your pantry, meal plan, and shopping list will build themselves around what you save.")
                             .font(.body)
                             .foregroundStyle(Color.rvSubtleText)
                             .multilineTextAlignment(.center)
@@ -388,64 +386,28 @@ struct RecipeListView: View {
     }
 
     private var heroHeader: some View {
-        ZStack(alignment: .topTrailing) {
-            RoundedRectangle(cornerRadius: RVDesign.heroRadius, style: .continuous)
-                .fill(LinearGradient.rvHeroGradient)
-                .overlay {
-                    RoundedRectangle(cornerRadius: RVDesign.heroRadius, style: .continuous)
-                        .stroke(Color.white.opacity(0.55), lineWidth: 1)
+        RVHeroBanner(
+            title: "Recipe Vault",
+            subtitle: "Your recipes, beautifully organized and ready to cook.",
+            systemImage: "fork.knife.circle.fill"
+        ) {
+            HStack(spacing: 10) {
+                heroActionButton(
+                    title: "Import",
+                    systemImage: "square.and.arrow.down",
+                    prominent: false
+                ) {
+                    showingImportSheet = true
                 }
 
-            Circle()
-                .fill(Color.white.opacity(0.32))
-                .frame(width: 148, height: 148)
-                .offset(x: 28, y: -36)
-
-            VStack(alignment: .leading, spacing: 18) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Recipe Vault")
-                            .font(.system(.largeTitle, design: .serif, weight: .bold))
-                            .foregroundStyle(Color.rvInk)
-
-                        Text("Beautifully organized recipes, with all your pantry and planning tools still intact.")
-                            .font(.subheadline)
-                            .foregroundStyle(Color.rvSubtleText)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    Spacer(minLength: 16)
-
-                    ZStack {
-                        RoundedRectangle(cornerRadius: RVDesign.cardRadius, style: .continuous)
-                            .fill(Color.white.opacity(0.85))
-                            .frame(width: 68, height: 68)
-
-                        Image(systemName: "fork.knife.circle.fill")
-                            .font(.system(size: 30))
-                            .foregroundStyle(LinearGradient.rvAccentGradient)
-                    }
-                }
-
-                HStack(spacing: 10) {
-                    heroActionButton(
-                        title: "Import",
-                        systemImage: "square.and.arrow.down",
-                        prominent: false
-                    ) {
-                        showingImportSheet = true
-                    }
-
-                    heroActionButton(
-                        title: "New Recipe",
-                        systemImage: "plus",
-                        prominent: true
-                    ) {
-                        showingAddRecipe = true
-                    }
+                heroActionButton(
+                    title: "New Recipe",
+                    systemImage: "plus",
+                    prominent: true
+                ) {
+                    showingAddRecipe = true
                 }
             }
-            .padding(24)
         }
     }
 
@@ -457,6 +419,7 @@ struct RecipeListView: View {
 
                 TextField("Search recipes, ingredients, tags...", text: $searchText)
                     .textInputAutocapitalization(.never)
+                    .submitLabel(.search)
 
                 if !searchText.isEmpty {
                     Button {
@@ -664,7 +627,8 @@ struct RecipeListView: View {
                 .tint(Color.rvAccent)
         }
         .padding(16)
-        .frame(width: 230, height: 150, alignment: .leading)
+        .frame(width: 230, alignment: .leading)
+        .frame(minHeight: 150, alignment: .leading)
         .background(Color.white.opacity(0.92))
         .clipShape(RoundedRectangle(cornerRadius: RVDesign.cardRadius, style: .continuous))
         .overlay {
@@ -684,19 +648,6 @@ struct RecipeListView: View {
             Image(systemName: "square.and.arrow.down")
         }
         .accessibilityLabel("Import recipes")
-    }
-
-    private var filterMenu: some View {
-        Menu {
-            Picker("Sort By", selection: $sortOrder) {
-                ForEach(SortOrder.allCases, id: \.self) { order in
-                    Text(order.rawValue).tag(order)
-                }
-            }
-        } label: {
-            Image(systemName: "line.3.horizontal.decrease.circle")
-        }
-        .accessibilityLabel("Sort recipes")
     }
 
     private func clearSelectionOnFilterChange() {
@@ -868,6 +819,7 @@ struct FilterChip: View {
             }
             .foregroundStyle(isSelected ? Color.white : Color.rvInk)
         }
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
         .buttonStyle(.plain)
     }
 }

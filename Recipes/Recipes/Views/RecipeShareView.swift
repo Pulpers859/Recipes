@@ -122,10 +122,7 @@ struct RecipeShareView: View {
             }
             .padding(.top, 8)
         }
-        .padding(RVDesign.cardPadding)
-        .background(Color.rvPaper)
-        .clipShape(RoundedRectangle(cornerRadius: RVDesign.cardRadius, style: .continuous))
-        .shadow(color: .black.opacity(0.06), radius: 12, y: 6)
+        .rvCard()
     }
     
     // MARK: - Formatted Text
