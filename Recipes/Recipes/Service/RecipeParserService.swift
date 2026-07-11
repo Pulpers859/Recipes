@@ -89,15 +89,16 @@ class RecipeParserService: ObservableObject {
     private func parseMultipleChunks(_ chunks: [String], pdfData: Data?, mode: ParseMode) async throws -> [Recipe] {
         parseProgress = "Found \(chunks.count) recipe(s)..."
 
-        var recipes: [Recipe] = []
-        var failedChunks: [String] = []
+        // Slot per chunk so recovered recipes land back at their original
+        // document position instead of being appended after the successes.
+        var slots: [Recipe?] = Array(repeating: nil, count: chunks.count)
+        var failedChunks: [(index: Int, text: String)] = []
         for (index, chunk) in chunks.enumerated() {
             parseProgress = "Parsing recipe \(index + 1) of \(chunks.count)..."
             do {
-                let recipe = try await parseSingleText(chunk, pdfData: nil, mode: mode)
-                recipes.append(recipe)
+                slots[index] = try await parseSingleText(chunk, pdfData: nil, mode: mode)
             } catch {
-                failedChunks.append(chunk)
+                failedChunks.append((index, chunk))
             }
         }
 
@@ -108,10 +109,19 @@ class RecipeParserService: ObservableObject {
             lastError = [lastError, message].compactMap { $0 }.joined(separator: "\n")
         }
 
+        var leftovers: [Recipe] = []
         if !failedChunks.isEmpty && hasAPIKey {
             parseProgress = "Retrying \(failedChunks.count) section(s) with batch AI extraction..."
-            if let recovered = try? await aiBatchParse(chunks: failedChunks, pdfData: nil) {
-                recipes.append(contentsOf: recovered)
+            if let recovered = try? await aiBatchParse(chunks: failedChunks.map(\.text), pdfData: nil) {
+                if recovered.count == failedChunks.count {
+                    // One recipe per failed chunk: restore document order.
+                    for (recipe, failure) in zip(recovered, failedChunks) {
+                        slots[failure.index] = recipe
+                    }
+                } else {
+                    // The AI merged or split sections; order is unknowable.
+                    leftovers = recovered
+                }
                 let stillMissing = failedChunks.count - recovered.count
                 if stillMissing > 0 {
                     reportSkipped(stillMissing)
@@ -122,6 +132,9 @@ class RecipeParserService: ObservableObject {
         } else if !failedChunks.isEmpty {
             reportSkipped(failedChunks.count)
         }
+
+        var recipes = slots.compactMap { $0 }
+        recipes.append(contentsOf: leftovers)
 
         if recipes.isEmpty {
             throw ParserError.parseError("Could not extract any recipes from the document")

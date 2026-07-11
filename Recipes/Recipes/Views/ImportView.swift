@@ -114,6 +114,14 @@ struct ImportView: View {
                     recipes: $pendingBatchRecipes,
                     parserWarning: parser.lastError
                 ) { accepted in
+                    // The source PDF rides on the first parsed recipe. If the
+                    // user excluded that one, move the PDF onto an accepted
+                    // recipe so the only copy of the source document survives.
+                    if let firstAccepted = accepted.first,
+                       !accepted.contains(where: { $0.originalPDFData != nil }),
+                       let orphanedPDF = pendingBatchRecipes.first(where: { $0.originalPDFData != nil })?.originalPDFData {
+                        firstAccepted.originalPDFData = orphanedPDF
+                    }
                     for recipe in accepted {
                         modelContext.insert(recipe)
                     }

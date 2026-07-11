@@ -426,7 +426,11 @@ class ShoppingListService {
             (.dairy, ["milk", "cream", "butter", "cheese", "yogurt", "sour cream", "egg", "half-and-half",
                        "whipping cream", "crème", "ricotta", "mozzarella", "parmesan", "cheddar",
                        "american cheese", "cream cheese", "protein powder", "whey", "casein"]),
-            (.meat, ["chicken", "beef", "pork", "lamb", "turkey", "bacon", "sausage", "ground",
+            // Bare "ground" is deliberately absent: it matched "ground cinnamon"
+            // before the spices list could. Named cuts cover ground meats whose
+            // species word isn't already in this list.
+            (.meat, ["chicken", "beef", "pork", "lamb", "turkey", "bacon", "sausage",
+                      "ground chuck", "ground round", "ground sirloin", "ground bison",
                       "steak", "tenderloin", "ribs", "ham", "veal", "brisket", "canadian bacon"]),
             (.seafood, ["salmon", "shrimp", "tuna", "cod", "tilapia", "crab", "lobster", "scallop",
                          "mussel", "clam", "anchovy", "fish"]),

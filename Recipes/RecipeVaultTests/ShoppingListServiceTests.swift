@@ -97,6 +97,12 @@ final class ShoppingListServiceTests: XCTestCase {
 
     // MARK: - Category Suggestions
 
+    func testGroundSpicesAreNotMeat() {
+        XCTAssertEqual(ShoppingListService.suggestedCategory(for: "ground cinnamon"), .spices)
+        XCTAssertEqual(ShoppingListService.suggestedCategory(for: "ground beef"), .meat)
+        XCTAssertEqual(ShoppingListService.suggestedCategory(for: "ground chuck"), .meat)
+    }
+
     func testWatermelonDoesNotMatchWaterBeverageRule() {
         XCTAssertEqual(ShoppingListService.suggestedCategory(for: "watermelon"), .produce)
         XCTAssertEqual(ShoppingListService.suggestedCategory(for: "sparkling water"), .beverages)
