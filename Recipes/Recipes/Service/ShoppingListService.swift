@@ -393,6 +393,12 @@ class ShoppingListService {
             || lower.contains("ginger paste") {
             return .pantry
         }
+
+        // Broth/stock is shelf-stable regardless of flavor — check before the
+        // keyword map, or "chicken broth" lands in the meat aisle.
+        if lower.contains("broth") || lower.contains("stock") || lower.contains("bouillon") {
+            return .pantry
+        }
         
         let mapping: [(ShoppingCategory, [String])] = [
             (.produce, ["lettuce", "tomato", "onion", "garlic", "pepper", "carrot", "celery", "potato",
