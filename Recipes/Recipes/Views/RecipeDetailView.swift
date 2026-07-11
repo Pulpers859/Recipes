@@ -15,6 +15,7 @@ struct RecipeDetailView: View {
     @State private var selectedPhotoIndex = 0
     @State private var showPhotoViewer = false
     @State private var actionErrorMessage: String?
+    @State private var isWritingBackup = false
     @State private var decodedImages: [Data: UIImage] = [:]
 
     init(recipe: Recipe) {
@@ -110,11 +111,16 @@ struct RecipeDetailView: View {
         }
         .alert("Delete Recipe?", isPresented: $showDeleteConfirmation) {
             Button("Delete", role: .destructive) {
-                deleteRecipe()
+                Task { await deleteRecipe() }
             }
             Button("Cancel", role: .cancel) { }
         } message: {
             Text("This also removes it from your meal plan. A safety backup of your library is saved on this device first.")
+        }
+        .overlay {
+            if isWritingBackup {
+                RVBlockingProgressOverlay(message: "Saving safety backup…")
+            }
         }
         .sheet(isPresented: $showShareRecipe) {
             RecipeShareView(recipe: recipe)
@@ -131,10 +137,14 @@ struct RecipeDetailView: View {
 
     // MARK: - Actions
 
-    private func deleteRecipe() {
+    private func deleteRecipe() async {
+        guard !isWritingBackup else { return }
+        isWritingBackup = true
+        defer { isWritingBackup = false }
         do {
             let allRecipes = try modelContext.fetch(FetchDescriptor<Recipe>())
-            _ = try RecipeExportService.writeAutomaticBackup(recipes: allRecipes)
+            let payload = RecipeLibraryMaintenance.fullBackupPayload(recipes: allRecipes, modelContext: modelContext)
+            _ = try await RecipeExportService.writeAutomaticBackup(payload: payload)
         } catch {
             actionErrorMessage = "Nothing was deleted because the safety backup could not be saved: \(error.localizedDescription)"
             AnalyticsService.shared.track("recipe_delete_backup_failed")

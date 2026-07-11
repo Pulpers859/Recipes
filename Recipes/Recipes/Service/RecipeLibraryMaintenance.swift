@@ -91,6 +91,12 @@ enum RecipeLibraryMaintenance {
             insertedCount += 1
         }
 
+        // v4 backups can carry pantry, shopping, and meal-plan sections.
+        // Merging is strictly additive — nothing existing is deleted or
+        // overwritten; records already present (by id or, for pantry, by
+        // normalized name) are skipped.
+        let restored = mergeAuxiliarySections(from: importResult, modelContext: modelContext)
+
         do {
             try modelContext.save()
         } catch {
@@ -106,11 +112,72 @@ enum RecipeLibraryMaintenance {
         var message = skippedCount > 0
             ? "Imported \(insertedCount) recipes (\(skippedCount) duplicates skipped)."
             : "Imported \(insertedCount) recipes successfully!"
+        if !restored.isEmpty {
+            message += " Also restored \(restored.joined(separator: ", "))."
+        }
         if importResult.unreadableCount > 0 {
             // A partial import must never read as a full success.
             message += " Warning: \(importResult.unreadableCount) record\(importResult.unreadableCount == 1 ? "" : "s") in the file could not be read and \(importResult.unreadableCount == 1 ? "was" : "were") NOT imported."
         }
         return MaintenanceOutcome(message: message, isError: importResult.unreadableCount > 0)
+    }
+
+    /// Additively merges pantry/shopping/meal-plan records from a v4 backup.
+    /// Returns human-readable fragments describing what was restored (empty
+    /// when the backup carried no auxiliary sections or everything existed).
+    private static func mergeAuxiliarySections(
+        from importResult: RecipeExportService.ImportResult,
+        modelContext: ModelContext
+    ) -> [String] {
+        var fragments: [String] = []
+
+        if !importResult.pantryItems.isEmpty {
+            let existing = (try? modelContext.fetch(FetchDescriptor<PantryItem>())) ?? []
+            let existingIDs = Set(existing.map(\.id))
+            let existingKeys = Set(existing.map { ShoppingListService.normalizedIngredientKey($0.name) })
+            var added = 0
+            for item in importResult.pantryItems
+            where !existingIDs.contains(item.id)
+                && !existingKeys.contains(ShoppingListService.normalizedIngredientKey(item.name)) {
+                modelContext.insert(item)
+                added += 1
+            }
+            if added > 0 { fragments.append("\(added) pantry \(added == 1 ? "item" : "items")") }
+        }
+
+        if !importResult.shoppingItems.isEmpty {
+            let existing = (try? modelContext.fetch(FetchDescriptor<ShoppingItem>())) ?? []
+            let existingIDs = Set(existing.map(\.id))
+            var added = 0
+            for item in importResult.shoppingItems where !existingIDs.contains(item.id) {
+                modelContext.insert(item)
+                added += 1
+            }
+            if added > 0 { fragments.append("\(added) shopping \(added == 1 ? "item" : "items")") }
+        }
+
+        if !importResult.mealPlans.isEmpty {
+            let existing = (try? modelContext.fetch(FetchDescriptor<MealPlan>())) ?? []
+            var added = 0
+            for plan in importResult.mealPlans {
+                if let match = MealPlanningService.plan(forWeekContaining: plan.weekStartDate, in: existing) {
+                    // Same week already planned: append only unseen entries so a
+                    // re-import can't duplicate meals.
+                    let knownEntryIDs = Set(match.entries.map(\.id))
+                    let newEntries = plan.entries.filter { !knownEntryIDs.contains($0.id) }
+                    if !newEntries.isEmpty {
+                        match.entries = match.entries + newEntries
+                        added += 1
+                    }
+                } else {
+                    modelContext.insert(plan)
+                    added += 1
+                }
+            }
+            if added > 0 { fragments.append("\(added) meal \(added == 1 ? "plan" : "plans")") }
+        }
+
+        return fragments
     }
 
     /// Outcome of a maintenance action: the user-facing message plus an
@@ -123,20 +190,41 @@ enum RecipeLibraryMaintenance {
 
     // MARK: - Delete All
 
+    /// Snapshot of the whole library (recipes plus pantry, shopping, and meal
+    /// plans fetched from the context) ready for the off-main-thread backup
+    /// write. Shared by every destructive path so the rolling safety backup
+    /// always carries the full app state.
+    @MainActor
+    static func fullBackupPayload(
+        recipes: [Recipe],
+        modelContext: ModelContext
+    ) -> RecipeExportService.BackupPayload {
+        RecipeExportService.makeBackupPayload(
+            recipes: recipes,
+            pantryItems: (try? modelContext.fetch(FetchDescriptor<PantryItem>())) ?? [],
+            shoppingItems: (try? modelContext.fetch(FetchDescriptor<ShoppingItem>())) ?? [],
+            mealPlans: (try? modelContext.fetch(FetchDescriptor<MealPlan>())) ?? []
+        )
+    }
+
     /// Backs up, cleans up meal-plan entries, then deletes every recipe. Never
     /// throws: returns the outcome to show whether it succeeded or bailed early
-    /// (each early exit leaves the store untouched, as before).
+    /// (each early exit leaves the store untouched, as before). Async because
+    /// the safety backup is encoded and written off the main thread; the
+    /// caller must block interaction while awaiting.
+    @MainActor
     static func deleteAllRecipes(
         _ recipes: [Recipe],
         modelContext: ModelContext
-    ) -> MaintenanceOutcome? {
+    ) async -> MaintenanceOutcome? {
         let count = recipes.count
         guard count > 0 else { return nil }
 
         // Write a safety backup first so this destructive action is recoverable
         // via "Import from JSON Backup".
         do {
-            try RecipeExportService.writeAutomaticBackup(recipes: recipes)
+            let payload = fullBackupPayload(recipes: recipes, modelContext: modelContext)
+            try await RecipeExportService.writeAutomaticBackup(payload: payload)
         } catch {
             AnalyticsService.shared.track("recipes_delete_all_backup_failed")
             return MaintenanceOutcome(message: "Nothing was deleted because the safety backup could not be written.", isError: true)
@@ -179,16 +267,18 @@ enum RecipeLibraryMaintenance {
     /// throws: returns the outcome to show. Writes the same safety backup as
     /// the other destructive paths BEFORE deleting anything — resolution
     /// permanently removes recipes, and a wrong merge needs a recovery story.
+    @MainActor
     static func resolveConflicts(
         _ recipes: [Recipe],
         modelContext: ModelContext
-    ) -> MaintenanceOutcome {
+    ) async -> MaintenanceOutcome {
         guard !recipes.isEmpty else {
             return MaintenanceOutcome(message: "No recipes to check for duplicates.", isError: false)
         }
 
         do {
-            try RecipeExportService.writeAutomaticBackup(recipes: recipes)
+            let payload = fullBackupPayload(recipes: recipes, modelContext: modelContext)
+            try await RecipeExportService.writeAutomaticBackup(payload: payload)
         } catch {
             AnalyticsService.shared.track("resolve_recipe_conflicts_backup_failed")
             return MaintenanceOutcome(message: "Duplicate cleanup did not run because the safety backup could not be written.", isError: true)

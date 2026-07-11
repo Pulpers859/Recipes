@@ -8,80 +8,114 @@ class RecipeExportService {
     
     // MARK: - JSON Export/Import (Backup)
     
-    /// Export all recipes as a JSON backup file
-    static func exportAsJSON(recipes: [Recipe]) throws -> Data {
-        let exportData = recipes.map { recipe -> ExportableRecipe in
-            ExportableRecipe(
-                recipeID: recipe.id,
-                title: recipe.title,
-                summary: recipe.summary,
-                ingredients: recipe.ingredients,
-                steps: recipe.steps.sorted { $0.order < $1.order },
-                servings: recipe.servings,
-                prepTime: recipe.prepTime,
-                cookTime: recipe.cookTime,
-                category: recipe.category.rawValue,
-                tags: recipe.tags,
-                cuisine: recipe.cuisine,
-                difficulty: recipe.difficulty.rawValue,
-                sourceURL: recipe.sourceURL,
-                sourceType: recipe.sourceType.rawValue,
-                notes: recipe.notes,
-                rating: recipe.rating,
-                isFavorite: recipe.isFavorite,
-                photoData: recipe.photoData,
-                dateLastCooked: recipe.dateLastCooked,
-                originalPDFData: recipe.originalPDFData,
-                dateAdded: recipe.dateAdded,
-                timesCooked: recipe.timesCooked
-            )
-        }
-        
-        let wrapper = ExportWrapper(
-            version: 3,
-            exportDate: Date(),
-            recipeCount: exportData.count,
-            recipes: exportData
+    /// Export the library as a JSON backup file. Since format v4 the backup
+    /// can also carry pantry items, shopping items, and meal plans as
+    /// optional top-level keys — older (v1–v3) files import unchanged.
+    static func exportAsJSON(
+        recipes: [Recipe],
+        pantryItems: [PantryItem] = [],
+        shoppingItems: [ShoppingItem] = [],
+        mealPlans: [MealPlan] = []
+    ) throws -> Data {
+        let payload = makeBackupPayload(
+            recipes: recipes,
+            pantryItems: pantryItems,
+            shoppingItems: shoppingItems,
+            mealPlans: mealPlans
         )
-        
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        return try encoder.encode(wrapper)
+        // Pretty-printed: this is the user-facing, shareable export.
+        return try encode(payload, outputFormatting: [.prettyPrinted, .sortedKeys])
     }
-    
+
     // MARK: - Automatic Safety Backup
 
     private static let backupDirectoryName = "RecipeVault/Backups"
     private static let automaticBackupFilename = "RecipeVault-Recipes-Latest.json"
 
-    /// Writes an on-device safety backup so destructive bulk deletes have a
-    /// recovery story. The file is restorable via "Import from JSON Backup".
-    @discardableResult
-    static func writeAutomaticBackup(recipes: [Recipe]) throws -> URL {
-        let documentsDirectory = try FileManager.default.url(
-            for: .documentDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
+    /// Immutable snapshot of everything the backup persists. Captured on the
+    /// main actor (where the SwiftData models live) so the expensive encode
+    /// and disk write can run off it. Contents are all value types.
+    struct BackupPayload: @unchecked Sendable {
+        fileprivate let recipes: [ExportableRecipe]
+        fileprivate let pantryItems: [ExportablePantryItem]
+        fileprivate let shoppingItems: [ExportableShoppingItem]
+        fileprivate let mealPlans: [ExportableMealPlan]
+    }
+
+    /// Stage 1 of the safety backup: snapshot the models into value types.
+    /// Cheap — `Data` fields are copy-on-write, so photos aren't copied.
+    /// Call this on the actor that owns the models (in the app, the main
+    /// actor); only the returned payload may cross to a background task.
+    static func makeBackupPayload(
+        recipes: [Recipe],
+        pantryItems: [PantryItem] = [],
+        shoppingItems: [ShoppingItem] = [],
+        mealPlans: [MealPlan] = []
+    ) -> BackupPayload {
+        BackupPayload(
+            recipes: recipes.map(ExportableRecipe.init(from:)),
+            pantryItems: pantryItems.map(ExportablePantryItem.init(from:)),
+            shoppingItems: shoppingItems.map(ExportableShoppingItem.init(from:)),
+            mealPlans: mealPlans.map(ExportableMealPlan.init(from:))
         )
-        let backupDirectory = documentsDirectory.appendingPathComponent(backupDirectoryName, isDirectory: true)
-        try FileManager.default.createDirectory(at: backupDirectory, withIntermediateDirectories: true)
-        let backupURL = backupDirectory.appendingPathComponent(automaticBackupFilename)
-        let data = try exportAsJSON(recipes: recipes)
-        try data.write(to: backupURL, options: .atomic)
-        return backupURL
+    }
+
+    /// Stage 2: encode and write the safety backup off the main thread, so a
+    /// photo-heavy library doesn't freeze the UI ahead of every delete. The
+    /// file is restorable via "Import from JSON Backup". Callers must await
+    /// the result BEFORE deleting anything — a failed backup aborts the
+    /// delete, exactly as before.
+    @discardableResult
+    static func writeAutomaticBackup(payload: BackupPayload) async throws -> URL {
+        try await Task.detached(priority: .userInitiated) {
+            // Compact encoding: this is a rolling machine-read safety file,
+            // and pretty-printing base64 photo blobs doubles nothing but time.
+            let data = try encode(payload, outputFormatting: [.sortedKeys])
+            let documentsDirectory = try FileManager.default.url(
+                for: .documentDirectory,
+                in: .userDomainMask,
+                appropriateFor: nil,
+                create: true
+            )
+            let backupDirectory = documentsDirectory.appendingPathComponent(backupDirectoryName, isDirectory: true)
+            try FileManager.default.createDirectory(at: backupDirectory, withIntermediateDirectories: true)
+            let backupURL = backupDirectory.appendingPathComponent(automaticBackupFilename)
+            try data.write(to: backupURL, options: .atomic)
+            return backupURL
+        }.value
+    }
+
+    private static func encode(_ payload: BackupPayload, outputFormatting: JSONEncoder.OutputFormatting) throws -> Data {
+        let wrapper = ExportWrapper(
+            version: currentBackupVersion,
+            exportDate: Date(),
+            recipeCount: payload.recipes.count,
+            recipes: payload.recipes,
+            pantryItems: payload.pantryItems.isEmpty ? nil : payload.pantryItems,
+            shoppingItems: payload.shoppingItems.isEmpty ? nil : payload.shoppingItems,
+            mealPlans: payload.mealPlans.isEmpty ? nil : payload.mealPlans
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = outputFormatting
+        return try encoder.encode(wrapper)
     }
 
     /// Current backup schema version produced by `exportAsJSON`.
-    static let currentBackupVersion = 3
+    /// v4 added optional pantry/shopping/meal-plan sections.
+    static let currentBackupVersion = 4
 
-    /// Result of a backup import: the decoded recipes plus how many records
-    /// in the file could NOT be read, so the UI can tell the user instead of
-    /// reporting a partial import as a full success.
+    /// Result of a backup import: the decoded records plus how many recipe
+    /// records in the file could NOT be read, so the UI can tell the user
+    /// instead of reporting a partial import as a full success. Pantry,
+    /// shopping, and meal-plan sections exist only in v4+ backups and decode
+    /// to empty arrays for older files.
     struct ImportResult {
         let recipes: [Recipe]
         let unreadableCount: Int
+        let pantryItems: [PantryItem]
+        let shoppingItems: [ShoppingItem]
+        let mealPlans: [MealPlan]
     }
 
     /// Import recipes from a JSON backup.
@@ -104,7 +138,10 @@ class RecipeExportService {
         }
 
         let decoded = wrapper.recipes.compactMap { $0.value }
-        guard !decoded.isEmpty else {
+        let pantry = (wrapper.pantryItems ?? []).compactMap { $0.value }
+        let shopping = (wrapper.shoppingItems ?? []).compactMap { $0.value }
+        let plans = (wrapper.mealPlans ?? []).compactMap { $0.value }
+        guard !decoded.isEmpty || !pantry.isEmpty || !shopping.isEmpty || !plans.isEmpty else {
             // Either an empty backup or every record failed to decode; both are
             // worth surfacing rather than returning a silent empty import.
             throw ImportError.noReadableRecipes
@@ -140,7 +177,50 @@ class RecipeExportService {
             recipe.timesCooked = max(exp.timesCooked ?? 0, 0)
             return recipe
         }
-        return ImportResult(recipes: recipes, unreadableCount: unreadable)
+
+        let pantryItems = pantry.map { exp -> PantryItem in
+            let item = PantryItem(
+                name: exp.name,
+                amount: max(exp.amount, 0),
+                unit: exp.unit,
+                category: ShoppingCategory(rawValue: exp.category) ?? .other,
+                isStaple: exp.isStaple
+            )
+            if let id = exp.id { item.id = id }
+            item.dateUpdated = exp.dateUpdated ?? Date()
+            return item
+        }
+
+        let shoppingItems = shopping.map { exp -> ShoppingItem in
+            let item = ShoppingItem(
+                name: exp.name,
+                amount: max(exp.amount, 0),
+                unit: exp.unit,
+                category: ShoppingCategory(rawValue: exp.category) ?? .other,
+                sourceRecipeIDs: exp.sourceRecipeIDs ?? [],
+                originalAmount: exp.originalAmount,
+                pantryReductionAmount: max(exp.pantryReductionAmount ?? 0, 0)
+            )
+            if let id = exp.id { item.id = id }
+            item.isChecked = exp.isChecked
+            item.dateAdded = exp.dateAdded ?? Date()
+            return item
+        }
+
+        let mealPlans = plans.map { exp -> MealPlan in
+            let plan = MealPlan(weekStartDate: exp.weekStartDate, entries: exp.entries)
+            if let id = exp.id { plan.id = id }
+            plan.dateCreated = exp.dateCreated ?? Date()
+            return plan
+        }
+
+        return ImportResult(
+            recipes: recipes,
+            unreadableCount: unreadable,
+            pantryItems: pantryItems,
+            shoppingItems: shoppingItems,
+            mealPlans: mealPlans
+        )
     }
     
     // MARK: - PDF Cookbook Export
@@ -372,14 +452,22 @@ private struct ExportWrapper: Codable {
     let exportDate: Date
     let recipeCount: Int
     let recipes: [ExportableRecipe]
+    // v4+: optional sections, omitted entirely when empty so recipes-only
+    // exports keep their pre-v4 shape.
+    let pantryItems: [ExportablePantryItem]?
+    let shoppingItems: [ExportableShoppingItem]?
+    let mealPlans: [ExportableMealPlan]?
 }
 
 /// Lenient counterpart used only for import. `version` is optional (older
-/// files may predate it) and each recipe is wrapped so a single corrupt
+/// files may predate it) and each record is wrapped so a single corrupt
 /// record can't fail the whole decode.
 private struct ImportWrapper: Decodable {
     let version: Int?
     let recipes: [FailableDecodable<ExportableRecipe>]
+    let pantryItems: [FailableDecodable<ExportablePantryItem>]?
+    let shoppingItems: [FailableDecodable<ExportableShoppingItem>]?
+    let mealPlans: [FailableDecodable<ExportableMealPlan>]?
 }
 
 /// Decodes to `nil` instead of throwing when the element is malformed.
@@ -405,7 +493,7 @@ enum ImportError: LocalizedError {
     }
 }
 
-private struct ExportableRecipe: Codable {
+fileprivate struct ExportableRecipe: Codable {
     var recipeID: UUID?
     let title: String
     let summary: String
@@ -430,4 +518,93 @@ private struct ExportableRecipe: Codable {
     // failing every record with "No readable recipes".
     let dateAdded: Date?
     let timesCooked: Int?
+}
+
+extension ExportableRecipe {
+    init(from recipe: Recipe) {
+        self.init(
+            recipeID: recipe.id,
+            title: recipe.title,
+            summary: recipe.summary,
+            ingredients: recipe.ingredients,
+            steps: recipe.steps.sorted { $0.order < $1.order },
+            servings: recipe.servings,
+            prepTime: recipe.prepTime,
+            cookTime: recipe.cookTime,
+            category: recipe.category.rawValue,
+            tags: recipe.tags,
+            cuisine: recipe.cuisine,
+            difficulty: recipe.difficulty.rawValue,
+            sourceURL: recipe.sourceURL,
+            sourceType: recipe.sourceType.rawValue,
+            notes: recipe.notes,
+            rating: recipe.rating,
+            isFavorite: recipe.isFavorite,
+            photoData: recipe.photoData,
+            dateLastCooked: recipe.dateLastCooked,
+            originalPDFData: recipe.originalPDFData,
+            dateAdded: recipe.dateAdded,
+            timesCooked: recipe.timesCooked
+        )
+    }
+}
+
+fileprivate struct ExportablePantryItem: Codable {
+    var id: UUID?
+    let name: String
+    let amount: Double
+    let unit: String
+    let category: String
+    let isStaple: Bool
+    let dateUpdated: Date?
+
+    init(from item: PantryItem) {
+        self.id = item.id
+        self.name = item.name
+        self.amount = item.amount
+        self.unit = item.unit
+        self.category = item.category.rawValue
+        self.isStaple = item.isStaple
+        self.dateUpdated = item.dateUpdated
+    }
+}
+
+fileprivate struct ExportableShoppingItem: Codable {
+    var id: UUID?
+    let name: String
+    let amount: Double
+    let unit: String
+    let category: String
+    let isChecked: Bool
+    let sourceRecipeIDs: [UUID]?
+    let originalAmount: Double?
+    let pantryReductionAmount: Double?
+    let dateAdded: Date?
+
+    init(from item: ShoppingItem) {
+        self.id = item.id
+        self.name = item.name
+        self.amount = item.amount
+        self.unit = item.unit
+        self.category = item.category.rawValue
+        self.isChecked = item.isChecked
+        self.sourceRecipeIDs = item.sourceRecipeIDs
+        self.originalAmount = item.originalAmount
+        self.pantryReductionAmount = item.pantryReductionAmount
+        self.dateAdded = item.dateAdded
+    }
+}
+
+fileprivate struct ExportableMealPlan: Codable {
+    var id: UUID?
+    let weekStartDate: Date
+    let dateCreated: Date?
+    let entries: [MealPlanEntry]
+
+    init(from plan: MealPlan) {
+        self.id = plan.id
+        self.weekStartDate = plan.weekStartDate
+        self.dateCreated = plan.dateCreated
+        self.entries = plan.entries
+    }
 }

@@ -17,6 +17,7 @@ struct SettingsView: View {
     @State private var showAPIKey = false
     @State private var tempAPIKey = ""
     @State private var showImportPicker = false
+    @State private var isWritingBackup = false
     @State private var exportMessage: (text: String, isError: Bool)?
     @State private var importResult: (text: String, isError: Bool)?
     @State private var showShareSheet = false
@@ -57,6 +58,11 @@ struct SettingsView: View {
                 .padding(.bottom, 28)
             }
             .background(Color.rvBackground.ignoresSafeArea())
+            .overlay {
+                if isWritingBackup {
+                    RVBlockingProgressOverlay(message: "Saving safety backup…")
+                }
+            }
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(Color.rvBackground, for: .navigationBar)
@@ -97,14 +103,14 @@ struct SettingsView: View {
             .onChange(of: maintenanceMessage?.text) { _, newValue in
                 scheduleBannerClear(newValue, isError: maintenanceMessage?.isError ?? false) { if maintenanceMessage?.text == newValue { withAnimation { maintenanceMessage = nil } } }
             }
-            .alert("Delete all recipes?", isPresented: $showDeleteAllConfirm) {
-                Button("Delete All", role: .destructive) { deleteAllRecipes() }
+            .alert("Delete All Recipes?", isPresented: $showDeleteAllConfirm) {
+                Button("Delete All", role: .destructive) { Task { await deleteAllRecipes() } }
                 Button("Cancel", role: .cancel) { }
             } message: {
-                Text("This will permanently delete all \(recipes.count) recipe(s) and clear their meal plan entries. A safety backup of the recipes (meal plans are not included) is saved on this device first.")
+                Text("This permanently deletes all \(recipes.count) \(recipes.count == 1 ? "recipe" : "recipes") and clears their meal plan entries. A safety backup of your library — including pantry, shopping list, and meal plans — is saved on this device first.")
             }
-            .alert("Resolve duplicate recipes?", isPresented: $showResolveConfirm) {
-                Button("Resolve Duplicates", role: .destructive) { resolveConflicts() }
+            .alert("Resolve Duplicate Recipes?", isPresented: $showResolveConfirm) {
+                Button("Resolve Duplicates", role: .destructive) { Task { await resolveConflicts() } }
                 Button("Cancel", role: .cancel) { }
             } message: {
                 Text("Recipes with the same title and ingredients are merged, and the duplicates are permanently deleted. A safety backup is saved on this device first.")
@@ -480,7 +486,14 @@ struct SettingsView: View {
     
     private func exportJSON() {
         do {
-            let data = try RecipeExportService.exportAsJSON(recipes: recipes)
+            // Full-app backup: pantry, shopping list, and meal plans ride
+            // along as optional v4 sections.
+            let data = try RecipeExportService.exportAsJSON(
+                recipes: recipes,
+                pantryItems: (try? modelContext.fetch(FetchDescriptor<PantryItem>())) ?? [],
+                shoppingItems: (try? modelContext.fetch(FetchDescriptor<ShoppingItem>())) ?? [],
+                mealPlans: (try? modelContext.fetch(FetchDescriptor<MealPlan>())) ?? []
+            )
             let formatter = DateFormatter()
             formatter.dateFormat = "yyyy-MM-dd"
             let filename = "RecipeVault-Backup-\(formatter.string(from: Date())).json"
@@ -490,7 +503,7 @@ struct SettingsView: View {
             showShareSheet = true
             let sizeMB = Double(data.count) / (1024 * 1024)
             let sizeNote = sizeMB > 25 ? " (\(String(format: "%.0f", sizeMB)) MB — photos are embedded inline)" : ""
-            exportMessage = ("Exported \(recipes.count) recipes\(sizeNote)", false)
+            exportMessage = ("Exported \(recipes.count) recipes with pantry, shopping list, and meal plans\(sizeNote)", false)
             AnalyticsService.shared.track("backup_export_json", metadata: ["count": "\(recipes.count)", "size_mb": "\(String(format: "%.1f", sizeMB))"])
         } catch {
             exportMessage = ("Export failed: \(error.localizedDescription)", true)
@@ -652,14 +665,20 @@ struct SettingsView: View {
         }
     }
     
-    private func deleteAllRecipes() {
-        if let outcome = RecipeLibraryMaintenance.deleteAllRecipes(recipes, modelContext: modelContext) {
+    private func deleteAllRecipes() async {
+        guard !isWritingBackup else { return }
+        isWritingBackup = true
+        defer { isWritingBackup = false }
+        if let outcome = await RecipeLibraryMaintenance.deleteAllRecipes(recipes, modelContext: modelContext) {
             maintenanceMessage = (outcome.message, outcome.isError)
         }
     }
 
-    private func resolveConflicts() {
-        let outcome = RecipeLibraryMaintenance.resolveConflicts(recipes, modelContext: modelContext)
+    private func resolveConflicts() async {
+        guard !isWritingBackup else { return }
+        isWritingBackup = true
+        defer { isWritingBackup = false }
+        let outcome = await RecipeLibraryMaintenance.resolveConflicts(recipes, modelContext: modelContext)
         maintenanceMessage = (outcome.message, outcome.isError)
     }
 

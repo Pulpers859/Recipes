@@ -265,3 +265,30 @@ struct RVPrimaryButtonLabel: View {
             .foregroundStyle(.white)
     }
 }
+
+/// Full-screen blocking overlay for short, must-finish work (e.g. writing the
+/// safety backup before a delete). Covers the screen so nothing can be edited
+/// between snapshotting the data and acting on it.
+struct RVBlockingProgressOverlay: View {
+    let message: String
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.22).ignoresSafeArea()
+            VStack(spacing: 14) {
+                ProgressView()
+                    .controlSize(.large)
+                    .tint(Color.rvAccent)
+                Text(message)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Color.rvInk)
+            }
+            .padding(28)
+            .background(Color.rvPaper, in: RoundedRectangle(cornerRadius: RVDesign.cardRadius, style: .continuous))
+            .shadow(color: .black.opacity(0.15), radius: 24, y: 8)
+        }
+        .transition(.opacity)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(message)
+    }
+}

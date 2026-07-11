@@ -21,6 +21,7 @@ struct RecipeListView: View {
     @State private var selectedRecipeIDs: Set<UUID> = []
     @State private var showDeleteSelectedConfirm = false
     @State private var actionErrorMessage: String?
+    @State private var isWritingBackup = false
     @State private var navigationPath: [RecipeRoute] = []
     @State private var pendingSpotlightRecipeID: UUID?
     @State private var spotlightRouteAttempts = 0
@@ -200,11 +201,16 @@ struct RecipeListView: View {
             .onChange(of: recipes.count) { _, _ in
                 routePendingSpotlightRecipe()
             }
-            .alert("Delete selected recipes?", isPresented: $showDeleteSelectedConfirm) {
-                Button("Delete", role: .destructive) { deleteSelectedRecipes() }
+            .alert("Delete Selected Recipes?", isPresented: $showDeleteSelectedConfirm) {
+                Button("Delete", role: .destructive) { Task { await deleteSelectedRecipes() } }
                 Button("Cancel", role: .cancel) { }
             } message: {
-                Text("This permanently deletes \(selectedRecipeIDs.count) recipe(s). A safety backup must be saved first.")
+                Text("This permanently deletes \(selectedRecipeIDs.count) \(selectedRecipeIDs.count == 1 ? "recipe" : "recipes") and removes \(selectedRecipeIDs.count == 1 ? "it" : "them") from your meal plan. A safety backup of your library is saved on this device first.")
+            }
+            .overlay {
+                if isWritingBackup {
+                    RVBlockingProgressOverlay(message: "Saving safety backup…")
+                }
             }
             .alert("Recipe Vault Couldn’t Finish", isPresented: Binding(
                 get: { actionErrorMessage != nil },
@@ -707,8 +713,8 @@ struct RecipeListView: View {
         }
     }
 
-    private func deleteSelectedRecipes() {
-        guard !selectedRecipeIDs.isEmpty else { return }
+    private func deleteSelectedRecipes() async {
+        guard !selectedRecipeIDs.isEmpty, !isWritingBackup else { return }
         let toDelete = recipes.filter { selectedRecipeIDs.contains($0.id) }
         let count = toDelete.count
         guard count > 0 else {
@@ -717,8 +723,11 @@ struct RecipeListView: View {
             return
         }
 
+        isWritingBackup = true
+        defer { isWritingBackup = false }
         do {
-            _ = try RecipeExportService.writeAutomaticBackup(recipes: recipes)
+            let payload = RecipeLibraryMaintenance.fullBackupPayload(recipes: recipes, modelContext: modelContext)
+            _ = try await RecipeExportService.writeAutomaticBackup(payload: payload)
         } catch {
             actionErrorMessage = "Nothing was deleted because the safety backup could not be saved: \(error.localizedDescription)"
             AnalyticsService.shared.track("recipes_bulk_delete_backup_failed")
