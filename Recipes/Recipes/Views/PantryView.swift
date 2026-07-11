@@ -15,7 +15,7 @@ struct PantryView: View {
     @State private var selectedCategory: ShoppingCategory = .pantry
     @State private var markAsStaple = false
     @State private var searchText = ""
-    @State private var pantryStatusMessage: String?
+    @State private var pantryStatus: PantryStatus?
     @State private var showShareSheet = false
     @State private var shareURL: URL?
     @State private var showClearAllConfirm = false
@@ -72,8 +72,8 @@ struct PantryView: View {
                     quickAddCard
                     syncCard
 
-                    if let pantryStatusMessage {
-                        statusCard(pantryStatusMessage)
+                    if let pantryStatus {
+                        RVStatusBanner(message: pantryStatus.message, tone: pantryStatus.tone)
                     }
 
                     if groupedItems.isEmpty {
@@ -87,6 +87,7 @@ struct PantryView: View {
                 .padding()
                 .padding(.bottom, 28)
             }
+            .scrollDismissesKeyboard(.onDrag)
             .background(Color.rvBackground.ignoresSafeArea())
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
@@ -128,7 +129,7 @@ struct PantryView: View {
                 Button("Clear All", role: .destructive) { clearAllPantryItems() }
                 Button("Cancel", role: .cancel) { }
             } message: {
-                Text("This will remove all \(pantryItems.count) pantry item(s). A recovery snapshot is saved first — tap Restore afterward to bring them back.")
+                Text("This removes all \(pantryItems.count) \(pantryItems.count == 1 ? "pantry item" : "pantry items"). A recovery snapshot is saved first — tap Restore afterward to bring them back.")
             }
             .alert("Delete \(itemPendingDelete?.name ?? "item")?", isPresented: Binding(
                 get: { itemPendingDelete != nil },
@@ -163,7 +164,7 @@ struct PantryView: View {
                         item.unit = editUnit.trimmingCharacters(in: .whitespacesAndNewlines)
                         item.dateUpdated = Date()
                         _ = persistPantryChanges(snapshot: pantryItems)
-                        pantryStatusMessage = "Updated \(item.name)."
+                        showStatus("Updated \(item.name).")
                     }
                     editingItem = nil
                 }
@@ -180,12 +181,14 @@ struct PantryView: View {
             .onChange(of: pantryBackupFingerprint) { _, _ in
                 refreshAutomaticBackup()
             }
-            .onChange(of: pantryStatusMessage) { _, newMessage in
-                guard newMessage != nil else { return }
+            .onChange(of: pantryStatus) { _, newStatus in
+                guard let newStatus else { return }
+                // Confirmations clear quickly; problems stay long enough to read.
+                let holdSeconds: Double = (newStatus.tone == .danger || newStatus.tone == .warning) ? 12 : 6
                 Task {
-                    try? await Task.sleep(for: .seconds(4))
-                    if pantryStatusMessage == newMessage {
-                        withAnimation { pantryStatusMessage = nil }
+                    try? await Task.sleep(for: .seconds(holdSeconds))
+                    if pantryStatus == newStatus {
+                        withAnimation { pantryStatus = nil }
                     }
                 }
             }
@@ -204,7 +207,7 @@ struct PantryView: View {
             systemImage: "cabinet.fill",
             metrics: [
                 ("Items", "\(pantryItems.count)"),
-                ("Covering", "\(activePantryCoverageCount)")
+                ("In Stock", "\(activePantryCoverageCount)")
             ]
         )
     }
@@ -215,6 +218,7 @@ struct PantryView: View {
                 .foregroundStyle(Color.rvSubtleText)
 
             TextField("Search pantry", text: $searchText)
+                .submitLabel(.search)
 
             if !searchText.isEmpty {
                 Button {
@@ -361,6 +365,8 @@ struct PantryView: View {
                 Image(systemName: "pencil.circle")
                     .font(.title3)
                     .foregroundStyle(Color.rvAccent)
+                    .frame(minWidth: 36, minHeight: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Edit quantity of \(item.name)")
@@ -373,6 +379,8 @@ struct PantryView: View {
                 Image(systemName: item.isStaple ? "checkmark.seal.fill" : "seal")
                     .font(.title3)
                     .foregroundStyle(item.isStaple ? Color.rvPrimary : Color.rvMuted)
+                    .frame(minWidth: 36, minHeight: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel(item.isStaple ? "Unmark \(item.name) as staple" : "Mark \(item.name) as staple")
@@ -388,6 +396,8 @@ struct PantryView: View {
                     .padding(.vertical, 7)
                     .background(Color.orange.opacity(0.14), in: Capsule())
                     .foregroundStyle(.orange)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Mark \(item.name) as out of stock")
@@ -398,6 +408,8 @@ struct PantryView: View {
                 Image(systemName: "trash")
                     .font(.subheadline)
                     .foregroundStyle(.red.opacity(0.7))
+                    .frame(minWidth: 36, minHeight: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Delete \(item.name)")
@@ -423,7 +435,7 @@ struct PantryView: View {
         let remaining = pantryItems.filter { $0.id != item.id }
         modelContext.delete(item)
         if persistPantryChanges(snapshot: remaining) {
-            pantryStatusMessage = "Removed \(itemName) from pantry."
+            showStatus("Removed \(itemName) from pantry.")
             AnalyticsService.shared.track("pantry_item_deleted")
         }
     }
@@ -450,13 +462,17 @@ struct PantryView: View {
         .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
     }
 
-    private func statusCard(_ message: String) -> some View {
-        Text(message)
-            .font(.subheadline.weight(.medium))
-            .foregroundStyle(Color.rvInk)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(16)
-            .background(Color.rvSurface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    private struct PantryStatus: Equatable {
+        let message: String
+        let tone: RVStatusBanner.Tone
+    }
+
+    private func showStatus(_ message: String, tone: RVStatusBanner.Tone = .success) {
+        withAnimation { pantryStatus = PantryStatus(message: message, tone: tone) }
+    }
+
+    private func showError(_ message: String) {
+        showStatus(message, tone: .danger)
     }
 
     private func syncButton(title: String, systemImage: String, action: @escaping () -> Void) -> some View {
@@ -511,9 +527,11 @@ struct PantryView: View {
             existing.category = selectedCategory
             existing.isStaple = existing.isStaple || markAsStaple
             existing.dateUpdated = Date()
-            pantryStatusMessage = absorbed
-                ? "Updated \(existing.name)."
-                : "Updated \(existing.name) — kept existing quantity because the units differ (\(existing.unit) vs \(normalizedUnit))."
+            if absorbed {
+                showStatus("Updated \(existing.name).")
+            } else {
+                showStatus("Updated \(existing.name) — kept existing quantity because the units differ (\(existing.unit) vs \(normalizedUnit)).", tone: .warning)
+            }
         } else {
             let item = PantryItem(
                 name: trimmedName,
@@ -523,7 +541,7 @@ struct PantryView: View {
                 isStaple: markAsStaple
             )
             modelContext.insert(item)
-            pantryStatusMessage = "Added \(trimmedName) to pantry."
+            showStatus("Added \(trimmedName) to pantry.")
             if persistPantryChanges(snapshot: pantryItems + [item]) {
                 AnalyticsService.shared.track("pantry_item_added", metadata: [
                     "category": selectedCategory.rawValue,
@@ -562,7 +580,7 @@ struct PantryView: View {
         do {
             try PantryBackupService.writePreClearBackup(pantryItems: pantryItems)
         } catch {
-            pantryStatusMessage = "Nothing was cleared because the recovery snapshot could not be saved: \(error.localizedDescription)"
+            showError("Nothing was cleared because the recovery snapshot could not be saved: \(error.localizedDescription)")
             AnalyticsService.shared.track("pantry_clear_backup_failed")
             return
         }
@@ -572,9 +590,10 @@ struct PantryView: View {
         }
         if persistPantryChanges(snapshot: []) {
             canRestoreBackup = PantryBackupService.hasRestorableBackup()
-            pantryStatusMessage = canRestoreBackup
-                ? "Cleared \(count) pantry item(s). Tap Restore to bring them back."
-                : "Cleared \(count) pantry item(s)."
+            let noun = count == 1 ? "pantry item" : "pantry items"
+            showStatus(canRestoreBackup
+                ? "Cleared \(count) \(noun). Tap Restore to bring them back."
+                : "Cleared \(count) \(noun).")
             AnalyticsService.shared.track("pantry_cleared", metadata: ["count": "\(count)"])
         }
     }
@@ -583,7 +602,7 @@ struct PantryView: View {
         do {
             let restored = try PantryBackupService.restoreFromPreClearBackup()
             guard !restored.isEmpty else {
-                pantryStatusMessage = "No recovery snapshot found to restore."
+                showStatus("No recovery snapshot found to restore.", tone: .warning)
                 return
             }
 
@@ -600,16 +619,16 @@ struct PantryView: View {
             }
 
             guard added > 0 else {
-                pantryStatusMessage = "Those pantry items are already restored."
+                showStatus("Those pantry items are already restored.", tone: .info)
                 return
             }
 
             if persistPantryChanges(snapshot: snapshot) {
-                pantryStatusMessage = "Restored \(added) pantry item(s) from backup."
+                showStatus("Restored \(added) \(added == 1 ? "pantry item" : "pantry items") from backup.")
                 AnalyticsService.shared.track("pantry_restored", metadata: ["count": "\(added)"])
             }
         } catch {
-            pantryStatusMessage = "Could not restore pantry: \(error.localizedDescription)"
+            showError("Could not restore pantry: \(error.localizedDescription)")
             AnalyticsService.shared.track("pantry_restore_failed")
         }
     }
@@ -617,7 +636,7 @@ struct PantryView: View {
     private func stockCheckedShoppingItems() {
         let checkedItems = checkedShoppingItems
         guard !checkedItems.isEmpty else {
-            pantryStatusMessage = "No checked shopping items to stock."
+            showStatus("No checked shopping items to stock.", tone: .info)
             return
         }
 
@@ -661,7 +680,7 @@ struct PantryView: View {
             if !unitConflicts.isEmpty {
                 message += " Kept \(unitConflicts.joined(separator: ", ")) on the list because the units differ from your pantry."
             }
-            pantryStatusMessage = message
+            showStatus(message, tone: unitConflicts.isEmpty ? .success : .warning)
             AnalyticsService.shared.track("pantry_stock_from_shopping", metadata: [
                 "added": "\(added)",
                 "updated": "\(updated)",
@@ -672,13 +691,13 @@ struct PantryView: View {
 
     private func refreshShoppingListWithPantry() {
         guard let plan = currentPlan else {
-            pantryStatusMessage = "Plan meals for this week first, then refresh your shopping list."
+            showStatus("Plan meals for this week first, then refresh your shopping list.", tone: .info)
             return
         }
 
         let entries = MealPlanningService.aggregatedServingEntries(for: plan, recipes: allRecipes)
         guard !entries.isEmpty else {
-            pantryStatusMessage = "No planned recipes found to build a shopping list."
+            showStatus("No planned recipes found to build a shopping list.", tone: .info)
             return
         }
 
@@ -690,7 +709,7 @@ struct PantryView: View {
         )
 
         if saveModelContext() {
-            pantryStatusMessage = "Shopping list refreshed with pantry coverage. \(neededCount) item(s) needed."
+            showStatus("Shopping list refreshed with pantry coverage. \(neededCount) \(neededCount == 1 ? "item" : "items") needed.")
             AnalyticsService.shared.track("pantry_refresh_shopping", metadata: [
                 "needed_count": "\(neededCount)",
                 "planned_recipe_count": "\(entries.count)"
@@ -703,10 +722,10 @@ struct PantryView: View {
             let exportURL = try PantryBackupService.makeShareableExportFile(pantryItems: pantryItems)
             shareURL = exportURL
             showShareSheet = true
-            pantryStatusMessage = "Exported \(pantryItems.count) pantry item(s)."
+            showStatus("Exported \(pantryItems.count) \(pantryItems.count == 1 ? "pantry item" : "pantry items").")
             AnalyticsService.shared.track("pantry_export_json", metadata: ["count": "\(pantryItems.count)"])
         } catch {
-            pantryStatusMessage = "Could not export pantry: \(error.localizedDescription)"
+            showError("Could not export pantry: \(error.localizedDescription)")
             AnalyticsService.shared.track("pantry_export_json_failed")
         }
     }
@@ -716,7 +735,7 @@ struct PantryView: View {
             _ = try PantryBackupService.writeAutomaticBackup(pantryItems: pantryItems)
         } catch {
             if !pantryItems.isEmpty {
-                pantryStatusMessage = "Could not update pantry backup: \(error.localizedDescription)"
+                showError("Could not update pantry backup: \(error.localizedDescription)")
             }
             AnalyticsService.shared.track("pantry_auto_backup_failed")
         }
@@ -729,7 +748,7 @@ struct PantryView: View {
             _ = try PantryBackupService.writeAutomaticBackup(pantryItems: snapshot)
             return true
         } catch {
-            pantryStatusMessage = "Saved pantry, but backup failed: \(error.localizedDescription)"
+            showStatus("Saved pantry, but backup failed: \(error.localizedDescription)", tone: .warning)
             AnalyticsService.shared.track("pantry_auto_backup_failed")
             return true
         }
@@ -741,7 +760,7 @@ struct PantryView: View {
             return true
         } catch {
             modelContext.rollback()
-            pantryStatusMessage = "Could not save pantry changes: \(error.localizedDescription)"
+            showError("Could not save pantry changes: \(error.localizedDescription)")
             AnalyticsService.shared.track("pantry_save_failed")
             return false
         }

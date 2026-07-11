@@ -17,14 +17,14 @@ struct SettingsView: View {
     @State private var showAPIKey = false
     @State private var tempAPIKey = ""
     @State private var showImportPicker = false
-    @State private var exportMessage: String?
-    @State private var importResult: String?
+    @State private var exportMessage: (text: String, isError: Bool)?
+    @State private var importResult: (text: String, isError: Bool)?
     @State private var showShareSheet = false
     @State private var shareURL: URL?
     @State private var showDeleteAllConfirm = false
     @State private var showResolveConfirm = false
     @State private var apiKeySource: APIKeyStore.KeySource?
-    @State private var apiKeyMessage: String?
+    @State private var apiKeyMessage: (text: String, isError: Bool)?
     /// Maintenance-card banner with an explicit error flag — tone must never
     /// be guessed by string-sniffing (a failed delete once rendered green).
     @State private var maintenanceMessage: (text: String, isError: Bool)?
@@ -85,17 +85,17 @@ struct SettingsView: View {
             // Status banners fade after a bit instead of sticking around
             // forever ("Exported 42 recipes" three days later reads as stale
             // state). Errors stay longer so they can be read and acted on.
-            .onChange(of: exportMessage) { _, newValue in
-                scheduleBannerClear(newValue) { if exportMessage == newValue { exportMessage = nil } }
+            .onChange(of: exportMessage?.text) { _, newValue in
+                scheduleBannerClear(newValue, isError: exportMessage?.isError ?? false) { if exportMessage?.text == newValue { withAnimation { exportMessage = nil } } }
             }
-            .onChange(of: importResult) { _, newValue in
-                scheduleBannerClear(newValue) { if importResult == newValue { importResult = nil } }
+            .onChange(of: importResult?.text) { _, newValue in
+                scheduleBannerClear(newValue, isError: importResult?.isError ?? false) { if importResult?.text == newValue { withAnimation { importResult = nil } } }
             }
-            .onChange(of: apiKeyMessage) { _, newValue in
-                scheduleBannerClear(newValue) { if apiKeyMessage == newValue { apiKeyMessage = nil } }
+            .onChange(of: apiKeyMessage?.text) { _, newValue in
+                scheduleBannerClear(newValue, isError: apiKeyMessage?.isError ?? false) { if apiKeyMessage?.text == newValue { withAnimation { apiKeyMessage = nil } } }
             }
             .onChange(of: maintenanceMessage?.text) { _, newValue in
-                scheduleBannerClear(newValue) { if maintenanceMessage?.text == newValue { withAnimation { maintenanceMessage = nil } } }
+                scheduleBannerClear(newValue, isError: maintenanceMessage?.isError ?? false) { if maintenanceMessage?.text == newValue { withAnimation { maintenanceMessage = nil } } }
             }
             .alert("Delete all recipes?", isPresented: $showDeleteAllConfirm) {
                 Button("Delete All", role: .destructive) { deleteAllRecipes() }
@@ -189,7 +189,7 @@ struct SettingsView: View {
             }
 
             if let message = apiKeyMessage {
-                RVStatusBanner(message: message, tone: message.lowercased().contains("could not") ? .danger : .success)
+                RVStatusBanner(message: message.text, tone: message.isError ? .danger : .success)
             }
 
             RVStatusBanner(
@@ -234,11 +234,11 @@ struct SettingsView: View {
             }
 
             if let message = exportMessage {
-                RVStatusBanner(message: message, tone: message.lowercased().contains("failed") ? .danger : .success)
+                RVStatusBanner(message: message.text, tone: message.isError ? .danger : .success)
             }
 
             if let result = importResult {
-                RVStatusBanner(message: result, tone: result.lowercased().contains("failed") ? .danger : .success)
+                RVStatusBanner(message: result.text, tone: result.isError ? .danger : .success)
             }
         }
         .rvCard()
@@ -423,7 +423,7 @@ struct SettingsView: View {
             let recipes = (try? context.fetch(FetchDescriptor<Recipe>())) ?? []
 
             if recipes.isEmpty {
-                exportMessage = "The archived database could not be read or contains no recipes."
+                exportMessage = ("The archived database could not be read or contains no recipes.", true)
                 return
             }
 
@@ -433,9 +433,9 @@ struct SettingsView: View {
             try jsonData.write(to: tempURL)
             shareURL = tempURL
             showShareSheet = true
-            exportMessage = "Exported \(recipes.count) recipes from the archive. Re-import this file to restore them."
+            exportMessage = ("Exported \(recipes.count) recipes from the archive. Re-import this file to restore them.", false)
         } catch {
-            exportMessage = "Could not read archived database: \(error.localizedDescription)"
+            exportMessage = ("Could not read archived database: \(error.localizedDescription)", true)
         }
     }
 
@@ -443,7 +443,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 12) {
             RVSectionTitle(title: "About")
             StatRow(label: "Version", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")
-            StatRow(label: "Recipe Vault", value: "SwiftUI + Claude")
+            StatRow(label: "Made for", value: "Your kitchen")
         }
         .rvCard()
     }
@@ -490,10 +490,10 @@ struct SettingsView: View {
             showShareSheet = true
             let sizeMB = Double(data.count) / (1024 * 1024)
             let sizeNote = sizeMB > 25 ? " (\(String(format: "%.0f", sizeMB)) MB — photos are embedded inline)" : ""
-            exportMessage = "Exported \(recipes.count) recipes\(sizeNote)"
+            exportMessage = ("Exported \(recipes.count) recipes\(sizeNote)", false)
             AnalyticsService.shared.track("backup_export_json", metadata: ["count": "\(recipes.count)", "size_mb": "\(String(format: "%.1f", sizeMB))"])
         } catch {
-            exportMessage = "Export failed: \(error.localizedDescription)"
+            exportMessage = ("Export failed: \(error.localizedDescription)", true)
             AnalyticsService.shared.track("backup_export_json_failed")
         }
     }
@@ -510,10 +510,10 @@ struct SettingsView: View {
             try data.write(to: tempURL)
             shareURL = tempURL
             showShareSheet = true
-            exportMessage = "Cookbook created with \(recipes.count) recipes"
+            exportMessage = ("Cookbook created with \(recipes.count) recipes", false)
             AnalyticsService.shared.track("backup_export_pdf", metadata: ["count": "\(recipes.count)"])
         } catch {
-            exportMessage = "PDF export failed: \(error.localizedDescription)"
+            exportMessage = ("PDF export failed: \(error.localizedDescription)", true)
             AnalyticsService.shared.track("backup_export_pdf_failed")
         }
     }
@@ -523,13 +523,14 @@ struct SettingsView: View {
     private func importFromPickedFile(url: URL) {
         do {
             let data = try loadImportData(from: url)
-            importResult = try RecipeLibraryMaintenance.importBackup(
+            let outcome = try RecipeLibraryMaintenance.importBackup(
                 data: data,
                 existingRecipes: recipes,
                 modelContext: modelContext
             )
+            importResult = (outcome.message, outcome.isError)
         } catch {
-            importResult = "Import failed: \(error.localizedDescription)"
+            importResult = ("Import failed: \(error.localizedDescription)", true)
             AnalyticsService.shared.track("backup_import_json_failed")
         }
     }
@@ -537,18 +538,19 @@ struct SettingsView: View {
     private func importFromClipboardJSON() {
         guard let clipboardText = UIPasteboard.general.string,
               let data = clipboardText.data(using: .utf8) else {
-            importResult = "Clipboard does not contain JSON text."
+            importResult = ("Clipboard does not contain JSON text.", true)
             return
         }
 
         do {
-            importResult = try RecipeLibraryMaintenance.importBackup(
+            let outcome = try RecipeLibraryMaintenance.importBackup(
                 data: data,
                 existingRecipes: recipes,
                 modelContext: modelContext
             )
+            importResult = (outcome.message, outcome.isError)
         } catch {
-            importResult = "Import failed: \(error.localizedDescription)"
+            importResult = ("Import failed: \(error.localizedDescription)", true)
             AnalyticsService.shared.track("backup_import_json_failed")
         }
     }
@@ -610,9 +612,9 @@ struct SettingsView: View {
             apiKey = trimmed
             tempAPIKey = trimmed
             apiKeySource = .keychain
-            apiKeyMessage = "API key saved securely."
+            apiKeyMessage = ("API key saved securely.", false)
         } catch {
-            apiKeyMessage = "Could not save API key: \(error.localizedDescription)"
+            apiKeyMessage = ("Could not save API key: \(error.localizedDescription)", true)
         }
     }
     
@@ -622,9 +624,9 @@ struct SettingsView: View {
             apiKey = APIKeyStore.loadClaudeKey() ?? ""
             tempAPIKey = ""
             apiKeySource = APIKeyStore.currentClaudeKeySource()
-            apiKeyMessage = apiKeySource == .bundledConfig ? "Saved override removed. App is using bundled config." : "API key removed."
+            apiKeyMessage = (apiKeySource == .bundledConfig ? "Saved override removed. App is using bundled config." : "API key removed.", false)
         } catch {
-            apiKeyMessage = "Could not remove API key: \(error.localizedDescription)"
+            apiKeyMessage = ("Could not remove API key: \(error.localizedDescription)", true)
         }
     }
 
@@ -640,13 +642,10 @@ struct SettingsView: View {
     }
 
     /// Clears a status banner after a delay: 12 s for errors (they need to be
-    /// read), 6 s for confirmations.
-    private func scheduleBannerClear(_ newValue: String?, clear: @escaping () -> Void) {
-        guard let newValue else { return }
-        let isError = newValue.lowercased().contains("could not")
-            || newValue.lowercased().contains("failed")
-            || newValue.lowercased().contains("nothing was")
-            || newValue.lowercased().contains("warning")
+    /// read), 6 s for confirmations. Tone comes from the banner's explicit
+    /// error flag — never from sniffing the message text.
+    private func scheduleBannerClear(_ newValue: String?, isError: Bool, clear: @escaping () -> Void) {
+        guard newValue != nil else { return }
         Task {
             try? await Task.sleep(for: .seconds(isError ? 12 : 6))
             withAnimation { clear() }

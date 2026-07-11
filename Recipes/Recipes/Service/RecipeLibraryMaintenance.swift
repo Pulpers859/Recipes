@@ -50,12 +50,14 @@ enum RecipeLibraryMaintenance {
 
     /// Imports a JSON backup, skipping records that already exist by
     /// fingerprint. Throws on size / format / save failures so the caller can
-    /// surface a failure message; returns the success message otherwise.
+    /// surface a failure message; otherwise returns the outcome, flagged as an
+    /// error when some records could not be read (a partial import must be
+    /// presented as a problem, not a success).
     static func importBackup(
         data: Data,
         existingRecipes: [Recipe],
         modelContext: ModelContext
-    ) throws -> String {
+    ) throws -> MaintenanceOutcome {
         guard data.count <= maxBackupImportBytes else {
             throw MaintenanceError.backupTooLarge
         }
@@ -108,7 +110,7 @@ enum RecipeLibraryMaintenance {
             // A partial import must never read as a full success.
             message += " Warning: \(importResult.unreadableCount) record\(importResult.unreadableCount == 1 ? "" : "s") in the file could not be read and \(importResult.unreadableCount == 1 ? "was" : "were") NOT imported."
         }
-        return message
+        return MaintenanceOutcome(message: message, isError: importResult.unreadableCount > 0)
     }
 
     /// Outcome of a maintenance action: the user-facing message plus an
