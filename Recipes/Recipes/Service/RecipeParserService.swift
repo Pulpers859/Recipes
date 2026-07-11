@@ -45,33 +45,34 @@ class RecipeParserService: ObservableObject {
         lastError = nil
         defer { isProcessing = false }
         
-        // Step 1: Extract text per page
+        // Step 1: Extract selectable text per page.
         parseProgress = "Extracting text from PDF..."
-        let pageTexts = try extractTextByPage(from: pdfData)
-        
-        // If no selectable text, try OCR — per page so multi-recipe
-        // splitting still works on scanned cookbooks.
+        var pageTexts = try extractTextByPage(from: pdfData)
+
+        // Step 2: Decide OCR per PAGE, not per document. A scanned cookbook
+        // with one digital cover page (or a text watermark layer) used to
+        // skip OCR entirely because "the PDF has text" — and then imported
+        // the cover page alone as the recipe. OCR any page whose selectable
+        // text is too thin to be a real content page.
+        let thinPageIndices = pageTexts.indices.filter {
+            pageTexts[$0].trimmingCharacters(in: .whitespacesAndNewlines).count < 40
+        }
+        if !thinPageIndices.isEmpty {
+            parseProgress = thinPageIndices.count == pageTexts.count
+                ? "No selectable text. Running OCR..."
+                : "Scanning \(thinPageIndices.count) page(s) without selectable text..."
+            let ocrTexts = try await ocrPages(thinPageIndices, from: pdfData)
+            for (index, text) in ocrTexts {
+                pageTexts[index] = text
+            }
+        }
+
         let allText = pageTexts.joined(separator: "\n")
         if allText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            parseProgress = "No selectable text. Running OCR..."
-            let ocrPageTexts = try await ocrFromPDFByPage(data: pdfData)
-            let ocrAllText = ocrPageTexts.joined(separator: "\n")
-            if ocrAllText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                throw ParserError.ocrFailed
-            }
-            // Feed per-page OCR text through the same splitting logic used for
-            // selectable-text PDFs, so scanned cookbooks are handled the same way.
-            let ocrChunks = splitIntoRecipeChunks(pageTexts: ocrPageTexts)
-            if ocrChunks.count <= 1 {
-                let recipe = try await parseSingleText(ocrAllText, pdfData: pdfData, mode: mode)
-                return [recipe]
-            }
-            // Fall through to the multi-recipe path below by replacing pageTexts.
-            // We reassign to a local var since the original is let-bound.
-            return try await parseMultipleChunks(ocrChunks, pdfData: pdfData, mode: mode)
+            throw ParserError.ocrFailed
         }
-        
-        // Step 2: Detect if this is a multi-recipe document
+
+        // Step 3: Detect if this is a multi-recipe document
         let recipeChunks = splitIntoRecipeChunks(pageTexts: pageTexts)
 
         if recipeChunks.count <= 1 {
@@ -100,19 +101,26 @@ class RecipeParserService: ObservableObject {
             }
         }
 
+        // Append the skip summary to any earlier warning (e.g. per-chunk
+        // truncation notices) instead of replacing it.
+        func reportSkipped(_ count: Int) {
+            let message = "Skipped \(count) of \(chunks.count) detected recipe sections that couldn't be parsed."
+            lastError = [lastError, message].compactMap { $0 }.joined(separator: "\n")
+        }
+
         if !failedChunks.isEmpty && hasAPIKey {
             parseProgress = "Retrying \(failedChunks.count) section(s) with batch AI extraction..."
             if let recovered = try? await aiBatchParse(chunks: failedChunks, pdfData: nil) {
                 recipes.append(contentsOf: recovered)
                 let stillMissing = failedChunks.count - recovered.count
                 if stillMissing > 0 {
-                    lastError = "Skipped \(stillMissing) of \(chunks.count) detected recipe sections that couldn't be parsed."
+                    reportSkipped(stillMissing)
                 }
             } else {
-                lastError = "Skipped \(failedChunks.count) of \(chunks.count) detected recipe sections that couldn't be parsed."
+                reportSkipped(failedChunks.count)
             }
         } else if !failedChunks.isEmpty {
-            lastError = "Skipped \(failedChunks.count) of \(chunks.count) detected recipe sections that couldn't be parsed."
+            reportSkipped(failedChunks.count)
         }
 
         if recipes.isEmpty {
@@ -228,7 +236,11 @@ class RecipeParserService: ObservableObject {
                     return try await aiParse(text: text, pdfData: pdfData)
                 } catch {
                     parseProgress = "AI parsing failed, falling back to manual..."
-                    lastError = "AI parse failed: \(error.localizedDescription). Using manual extraction."
+                    // Don't clobber an earlier, more specific warning (e.g. the
+                    // truncation notice) with this generic one.
+                    if lastError == nil {
+                        lastError = "AI parse failed: \(error.localizedDescription). Using manual extraction."
+                    }
                     return manualParse(text: text, pdfData: pdfData)
                 }
             } else {
@@ -301,6 +313,11 @@ class RecipeParserService: ObservableObject {
 
         let responseData = try await callClaudeAPI(requestBody)
         let parsed = try JSONDecoder().decode(AIParsedRecipe.self, from: responseData)
+        // A decode that salvaged nothing useful is a failure, not a recipe —
+        // let auto mode fall back to the manual parser.
+        guard !(parsed.ingredients.isEmpty && parsed.steps.isEmpty) else {
+            throw ParserError.parseError("The AI response contained no ingredients or steps")
+        }
         return parsed.toRecipe(sourceType: .aiParsed, originalPDFData: pdfData)
     }
     
@@ -429,29 +446,28 @@ class RecipeParserService: ObservableObject {
     
     // MARK: - OCR
     
-    private func ocrFromPDF(data: Data) async throws -> String {
-        let pages = try await ocrFromPDFByPage(data: data)
-        return pages.joined(separator: "\n\n")
-    }
-
-    private func ocrFromPDFByPage(data: Data) async throws -> [String] {
+    /// OCRs the given pages (capped at 20 for memory/time) and returns
+    /// page index → recognized text.
+    private func ocrPages(_ pageIndices: [Int], from data: Data) async throws -> [Int: String] {
         guard let document = PDFDocument(data: data) else {
             throw ParserError.invalidPDF
         }
 
-        let pageCount = min(document.pageCount, 20)
-        if document.pageCount > 20 {
+        let cap = 20
+        let selected = pageIndices.filter { $0 < document.pageCount }.sorted()
+        let toScan = Array(selected.prefix(cap))
+        if selected.count > cap {
             await MainActor.run {
-                let skipped = document.pageCount - 20
-                parseProgress = "Only scanning the first 20 of \(document.pageCount) pages (\(skipped) skipped)."
+                let skipped = selected.count - cap
+                parseProgress = "Only scanning the first \(cap) of \(selected.count) scanned pages (\(skipped) skipped)."
                 if lastError == nil {
-                    lastError = "This PDF has \(document.pageCount) pages but only the first 20 were scanned. The remaining \(skipped) pages were skipped."
+                    lastError = "This PDF has \(selected.count) pages needing OCR but only the first \(cap) were scanned. The remaining \(skipped) pages were skipped."
                 }
             }
         }
 
-        var pageTexts: [String] = []
-        for i in 0..<pageCount {
+        var results: [Int: String] = [:]
+        for i in toScan {
             let pageText: String = try await {
                 guard let page = document.page(at: i) else { return "" }
                 let bounds = page.bounds(for: .mediaBox)
@@ -476,9 +492,9 @@ class RecipeParserService: ObservableObject {
                 guard let cg = cgImage else { return "" }
                 return try await recognizeText(in: cg)
             }()
-            pageTexts.append(pageText)
+            results[i] = pageText
         }
-        return pageTexts
+        return results
     }
     
     private func ocrFromImage(data: Data) async throws -> String {

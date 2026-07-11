@@ -85,7 +85,9 @@ private struct ZoomableRecipeImageView: View {
                         .frame(width: proxy.size.width, height: proxy.size.height)
                         .scaleEffect(scale)
                         .offset(offset)
-                        .gesture(dragGesture)
+                        // Pan only while zoomed in — at 1x the drag gesture
+                        // competed with the TabView's page swipe.
+                        .gesture(scale > 1.01 ? dragGesture : nil)
                         .simultaneousGesture(magnificationGesture)
                         .onTapGesture(count: 2) {
                             resetZoom()

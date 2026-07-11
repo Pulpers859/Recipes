@@ -31,22 +31,19 @@ enum AIModelSettings {
 }
 
 enum AppConfig {
-    static let anthropicAPIKeyInfoPlistKey = "ANTHROPIC_API_KEY"
+    static let anthropicAPIKeyEnvironmentKey = "ANTHROPIC_API_KEY"
 
+    /// Development-only fallback: an environment variable set in the Xcode
+    /// scheme (simulator/dev runs). The previous Info.plist path was removed
+    /// deliberately — a key wired through build settings gets baked in
+    /// plaintext into every shipped IPA, where it is trivially extractable.
+    /// Real devices use the Keychain via Settings.
     static var anthropicAPIKeyFallback: String? {
-        if let env = ProcessInfo.processInfo.environment[anthropicAPIKeyInfoPlistKey]?
+        if let env = ProcessInfo.processInfo.environment[anthropicAPIKeyEnvironmentKey]?
             .trimmingCharacters(in: .whitespacesAndNewlines),
            !env.isEmpty {
             return env
         }
-
-        if let plistValue = Bundle.main.object(forInfoDictionaryKey: anthropicAPIKeyInfoPlistKey) as? String {
-            let cleaned = plistValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !cleaned.isEmpty {
-                return cleaned
-            }
-        }
-
         return nil
     }
 }

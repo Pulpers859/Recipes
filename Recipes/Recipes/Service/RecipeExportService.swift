@@ -76,14 +76,23 @@ class RecipeExportService {
     /// Current backup schema version produced by `exportAsJSON`.
     static let currentBackupVersion = 3
 
+    /// Result of a backup import: the decoded recipes plus how many records
+    /// in the file could NOT be read, so the UI can tell the user instead of
+    /// reporting a partial import as a full success.
+    struct ImportResult {
+        let recipes: [Recipe]
+        let unreadableCount: Int
+    }
+
     /// Import recipes from a JSON backup.
     ///
     /// Resilience guarantees:
     /// - A backup whose `version` is newer than this build understands is
     ///   rejected with a clear error rather than silently mis-imported.
     /// - One malformed recipe record is skipped instead of throwing away the
-    ///   entire file (each record decodes independently).
-    static func importFromJSON(data: Data) throws -> [Recipe] {
+    ///   entire file (each record decodes independently), and the skip count
+    ///   is reported.
+    static func importFromJSON(data: Data) throws -> ImportResult {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
 
@@ -100,8 +109,9 @@ class RecipeExportService {
             // worth surfacing rather than returning a silent empty import.
             throw ImportError.noReadableRecipes
         }
+        let unreadable = wrapper.recipes.count - decoded.count
 
-        return decoded.map { exp in
+        let recipes = decoded.map { exp in
             let recipe = Recipe(
                 title: exp.title,
                 summary: exp.summary,
@@ -125,11 +135,12 @@ class RecipeExportService {
             if let exportedID = exp.recipeID {
                 recipe.id = exportedID
             }
-            recipe.dateAdded = exp.dateAdded
+            recipe.dateAdded = exp.dateAdded ?? Date()
             recipe.dateLastCooked = exp.dateLastCooked
-            recipe.timesCooked = max(exp.timesCooked, 0)
+            recipe.timesCooked = max(exp.timesCooked ?? 0, 0)
             return recipe
         }
+        return ImportResult(recipes: recipes, unreadableCount: unreadable)
     }
     
     // MARK: - PDF Cookbook Export
@@ -415,6 +426,8 @@ private struct ExportableRecipe: Codable {
     let photoData: [Data]?
     let dateLastCooked: Date?
     let originalPDFData: Data?
-    let dateAdded: Date
-    let timesCooked: Int
+    // Optional so backups that predate these fields still decode instead of
+    // failing every record with "No readable recipes".
+    let dateAdded: Date?
+    let timesCooked: Int?
 }

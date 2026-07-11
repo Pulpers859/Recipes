@@ -1,5 +1,94 @@
 # Recipe Vault App Review Findings
 
+Last reviewed: 2026-07-11 (second full-app audit; June findings below preserved for history)
+
+## Second-Pass Audit (2026-07-11)
+
+Four parallel audit lanes (data safety, import/parsing, SwiftUI flows/UX, security/config) re-swept the app after the June fixes. The June fixes held up almost everywhere; this pass found a new layer of silent-wrong-content and trust failures underneath them. Parser behavior was verified by actually executing `IngredientLineParser`, `JSONPayloadExtractor`, and `URLSafetyValidator` on a Linux Swift toolchain (all pre-existing tests plus 8 new regression tests pass).
+
+### High Severity — Fixed
+
+41. **Ingredient parser summed all leading numbers** — "1 400g can chopped tomatoes" parsed as amount **401 g**; "1 28-oz can San Marzano…" as **29**; "2 8-inch tortillas" as **10**. This poisoned the primary URL import path (JSON-LD routes every ingredient through this parser) and propagated into serving scaling and shopping lists. The amount pattern now matches a single quantity token (mixed numbers like "1 1/2" still sum; size qualifiers stay in the name). Also fixed: en/em-dash ranges ("¼–½ tsp"), comma decimals ("1,5 kg"), thousands separators ("1,500 g"), and missing units (pint/quart/gallon/dash/sprig/stalk).
+
+42. **In-flight imports survived Cancel/dismissal and inserted unreviewed recipes** — a slow PDF OCR or URL scrape finished minutes after the user cancelled, silently inserting an unreviewed recipe with no review sheet. Import tasks are now held in state, cancelled on Cancel/onDisappear, and check for cancellation before inserting.
+
+43. **Any selectable text in a PDF disabled OCR for the whole document** — a scanned cookbook with a digital cover page imported the cover text as "the recipe". OCR is now decided per page (pages with under 40 chars of selectable text get OCR'd).
+
+44. **Pantry "Clear All" deleted everything even when its promised recovery snapshot failed to write** — and then overwrote the rolling backup with an empty pantry, destroying both recovery paths. Now aborts with nothing deleted, matching Delete All Recipes.
+
+45. **"Resolve Duplicate Recipes" deleted recipes with no confirmation and no backup** — the only destructive path without either. Now confirms first and writes the safety backup before touching anything.
+
+46. **"Mark as Cooked & Close" swallowed save failures** (`try? save()` then dismiss) — the last remaining `try?`-save in the Views layer. Now surfaces the error with Stay/Close Anyway options.
+
+47. **Batch-import preview could leak an excluded recipe into the library** — previewing a pending recipe in the editor and tapping Save inserted it immediately; excluding it afterwards left it in the library anyway. The preview editor now runs in a preview-only mode; only "Save N Recipes" inserts.
+
+48. **Batch review sheet could be swiped away, discarding an entire cookbook parse** — now `interactiveDismissDisabled` with a confirmation on Cancel, and a failed batch save keeps the sheet open, rolls back the inserts, and shows the error (it used to dismiss looking successful, leaving zombie inserts for a later autosave).
+
+### Medium Severity — Fixed
+
+49. **Stock-to-pantry flows discarded quantities on unit conflicts** — both "Stock Checked Shopping Items" and the row-level stock action ignored `absorbStock`'s failure result and deleted the shopping item anyway ("5 lb flour" vanished against a "2 cup flour" pantry entry). Conflicting items now stay on the list with an explanation. `absorbStock` itself also no longer sums a bare count into a unit ("3" eggs + "2 lb" ≠ "5 lb").
+
+50. **Shopping aggregation silently dropped amounts when units couldn't convert** — "2 cup flour" + "500 g flour" produced a list saying just "2 cup flour". Incompatible units now become separate line items, and pantry coverage is consumed without double-counting.
+
+51. **Same-URL duplicates were never detected** — since fix #36 unified fingerprints, the resolver's similarity thresholds were dead code (group members always had identical ingredient sets), so the most common real duplicate — the same page re-imported with slightly different parsed ingredients — never grouped. A second pass now groups by title + source URL with the 0.5 overlap threshold. Spotlight de-indexing moved to after the successful save.
+
+52. **JSON-LD stub recipes blocked the better AI fallback** — a Recipe node with zero ingredients and steps (carousel entries, single-string `recipeIngredient`, arrays with nulls, legacy `ingredients` key) "succeeded" and stopped strategy 2 from ever running. Ingredient parsing is now shape-tolerant and empty candidates are rejected so scanning/fallback continues.
+
+53. **Fractional ISO durations parsed catastrophically** — `PT1.5H` read as 300 minutes (digits after the decimal matched `(\d+)H`). Now parses fractional components.
+
+54. **Backup import hid unreadable records** — a 100-recipe backup with 40 corrupt records reported "Imported 60 recipes successfully!". The skip count is now reported, and `dateAdded`/`timesCooked` are decode-optional so older backups can't fail wholesale.
+
+55. **Settings maintenance messages appeared in the wrong card with string-sniffed tone** — a failed delete-all rendered as a green success banner in the Data card. Maintenance now has its own banner with an explicit error flag; all Settings banners auto-clear (6 s success / 12 s error).
+
+56. **AI response decoding was all-or-nothing** — a missing `summary` or `"amount": "1/2"` as a string discarded the entire (otherwise good) AI parse and silently fell back to the much weaker manual parser. Decoding is now field-tolerant, single bad ingredients/steps are skipped, and a salvaged-but-empty recipe is treated as a failure so fallback still triggers.
+
+57. **SSRF: expanded IPv6 literals bypassed the blocklist** — `[0:0:0:0:0:0:0:1]` and `[0:0:0:0:0:ffff:127.0.0.1]` passed the string-prefix checks. IPv6 hosts are now parsed to numeric groups and classified by value (loopback, link-local, site-local, ULA, v4-mapped/compatible → dotted-quad rules). Verified against 33 bypass/legit cases.
+
+58. **No response cap on page fetch** — a huge or malicious page could stream hundreds of MB into memory. Fetch is now streamed with a 10 MB ceiling, obvious non-page content types are refused, and the legacy-encoding fallback is Windows-1252 (real curly quotes instead of C1 control bytes).
+
+59. **Info.plist API-key path removed** — the remaining structural key-leak vector (a key wired via build settings ships in plaintext in the IPA). Fallback is now env-var only (dev/simulator); devices use the Keychain.
+
+60. **Editor Cancel discarded work without confirmation** — Cancel now confirms when there are unsaved edits (or the recipe is an unreviewed import). Meal-plan title sync moved before the explicit save so it rides the same transaction.
+
+61. **Import re-entrancy** — PDF/photo/URL buttons are disabled while any parse is in flight (two concurrent parses raced shared parser state and orphaned the first recipe unreviewed).
+
+62. **Cooking-mode contradictions** — the exit warning claimed timers would stop while notifications deliberately kept firing (copy now matches behavior); notification-denied state (tracked since June but never read) now shows a banner explaining timers can't alert a locked phone.
+
+### Low Severity / Polish — Fixed
+
+63. Recipes-tab performance: `filteredRecipes` computed once per render instead of four times; pantry suggestions cached in state instead of re-normalizing every ingredient of every recipe on every render; Settings recovery-card file I/O moved out of body; editor photo thumbnails use the downsampling cache instead of decoding full-res JPEGs per keystroke.
+64. Stale import errors no longer greet the next import session; failed photo picks show a message instead of doing nothing (import + editor).
+65. URL AI path now warns with the trimmed percentage (parity with the PDF path, fix #26); multi-chunk warnings append instead of clobbering each other.
+66. `normalizedList` no longer deletes "("-prefixed ingredients like "(optional) chopped parsley" (only fully-parenthesized notes are dropped).
+67. JSON-LD: `recipeCategory` array form recognized; keywords/cuisine entity-decoded.
+68. Recipe IDs captured before `modelContext.delete` at every delete site (deleted-model property access is a known crash window); bulk Spotlight removal API added.
+69. Pantry single-item delete now confirms (it has no recovery story — the Restore button only covers Clear All); accessibility labels added across pantry rows, meal plan entries, batch review, editor photos, list/detail toolbars, shopping quick-add; haptics on favorite toggle and shopping check-off; photo viewer pan no longer fights the page swipe at 1x; recipe list scroll indicators restored; selection cleared when filters change; recovery archives open read-only (a writable open could mutate the only copy of lost data).
+70. `PrivacyInfo.xcprivacy` added (required-reason declarations for UserDefaults and file-timestamp APIs; no tracking, no collected data) — an App Store submission blocker.
+71. AI step ordering: ties broken by original position (Swift's sort is not stable); step `order` decode-optional.
+
+### Verified Clean (no action needed)
+
+- No secrets in source or any git history (pickaxe across sk-ant/ghp_/AKIA/BEGIN-key patterns).
+- Keychain usage correct; analytics metadata contains no recipe content or PII; `.private` redaction in place.
+- Python migration scripts free of injection/traversal (June fixes hold).
+- Test target correctly wired in pbxproj; no ATS exceptions; app store recovery ladder (AppDataStack) sound.
+- June audit fixes verified not regressed (spot-checked ~15 of 40); one reported "unreachable analytics code" finding was a false positive (returns are inside catch blocks).
+
+### Known Remaining (deliberately not fixed)
+
+- **DNS rebinding** is still not defended (documented accepted risk; needs socket-level resolved-address validation).
+- **No certificate pinning** on Anthropic API calls (standard posture for third-party APIs).
+- **Meal plans and shopping/pantry items are not part of recipe backups**; delete-all copy now says so, but a full-app backup format would be the real fix.
+- **PDF chunk splitter heuristics** are still tuned for macro-style cookbooks; recipes whose ingredients and servings land on different pages can merge into a neighbor chunk. Batch review is the mitigation.
+- **Whole-library JSON backup (photos included) is written synchronously on the main thread before every delete** — correct but can freeze multi-second on large photo-heavy libraries. Needs an async design with a blocking progress UI.
+- `RecipeListView` is still ~1,000 lines and would benefit from decomposition (June "Highest-Value Future Work" #7).
+- Batch AI recovery appends recovered recipes after successes (document order lost); `originalPDFData` attaches the whole cookbook to the first recipe only.
+- Non-Gregorian calendar day labels in MealPlanView; week bucketing shifts if the user changes first-weekday (display-level).
+
+---
+
+# June 2026 Review (historical)
+
 Last reviewed: 2026-06-28
 
 ## Brutally Honest Summary

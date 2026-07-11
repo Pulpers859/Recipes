@@ -181,8 +181,12 @@ struct Ingredient: Codable, Hashable, Identifiable {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let lower = trimmed.lowercased()
         
+        // A "("-prefixed line is only a note when it's fully parenthesized —
+        // "(see note 3)" is a note, "(optional) chopped parsley" is food.
+        let fullyParenthesized = trimmed.hasPrefix("(") && trimmed.hasSuffix(")")
+
         return trimmed.hasPrefix("*")
-            || trimmed.hasPrefix("(")
+            || fullyParenthesized
             || lower == "ingredients"
             || lower == "ingredient"
             || lower == "instructions"

@@ -71,7 +71,24 @@ struct RecipeListView: View {
         return result
     }
 
-    private var pantrySuggestions: [PantrySuggestion] {
+    /// Cached in state and refreshed via `.task(id:)` — computing this in
+    /// body re-normalized every ingredient of every recipe on every render.
+    @State private var pantrySuggestions: [PantrySuggestion] = []
+
+    /// Cheap change-key for the suggestions: pantry composition + library
+    /// size. (An ingredient edit alone refreshes on next tab appearance.)
+    private var pantrySuggestionKey: Int {
+        var hasher = Hasher()
+        for item in pantryItems {
+            hasher.combine(item.name)
+            hasher.combine(item.isStaple)
+            hasher.combine(item.amount > 0)
+        }
+        hasher.combine(recipes.count)
+        return hasher.finalize()
+    }
+
+    private func computePantrySuggestions() -> [PantrySuggestion] {
         let pantryKeys = Set(
             pantryItems
                 .filter { $0.isStaple || $0.amount > 0 }
@@ -128,6 +145,7 @@ struct RecipeListView: View {
                     } label: {
                         Image(systemName: "plus.circle.fill")
                     }
+                    .accessibilityLabel("Add recipe manually")
                 }
 
                 ToolbarItem(placement: .secondaryAction) {
@@ -158,6 +176,14 @@ struct RecipeListView: View {
                     SpotlightIndexingService.shared.indexAllRecipesIfNeeded(recipes)
                 }
             }
+            .task(id: pantrySuggestionKey) {
+                pantrySuggestions = computePantrySuggestions()
+            }
+            // Selection is invisible outside the current filter; keep what's
+            // selected aligned with what's on screen.
+            .onChange(of: debouncedSearchText) { _, _ in clearSelectionOnFilterChange() }
+            .onChange(of: selectedCategory) { _, _ in clearSelectionOnFilterChange() }
+            .onChange(of: showFavoritesOnly) { _, _ in clearSelectionOnFilterChange() }
             .task(id: searchText) {
                 // Debounce: cancelled (throws) when searchText changes again.
                 if searchText.isEmpty {
@@ -268,6 +294,8 @@ struct RecipeListView: View {
 
     private var recipeListContent: some View {
         ScrollView {
+            // Filter + sort once per render, not four times.
+            let filtered = filteredRecipes
             VStack(alignment: .leading, spacing: 24) {
                 heroHeader
                     .padding(.horizontal)
@@ -309,7 +337,7 @@ struct RecipeListView: View {
                                 .font(.system(.title3, design: .serif, weight: .bold))
                                 .foregroundStyle(Color.rvInk)
 
-                            Text("\(filteredRecipes.count) recipe\(filteredRecipes.count == 1 ? "" : "s")")
+                            Text("\(filtered.count) recipe\(filtered.count == 1 ? "" : "s")")
                                 .font(.subheadline)
                                 .foregroundStyle(Color.rvSubtleText)
                         }
@@ -320,12 +348,12 @@ struct RecipeListView: View {
                     }
                     .padding(.horizontal)
 
-                    if filteredRecipes.isEmpty {
+                    if filtered.isEmpty {
                         emptyResultsView
                             .padding(.horizontal)
                     } else {
                         LazyVStack(spacing: 16) {
-                            ForEach(filteredRecipes, id: \.id) { recipe in
+                            ForEach(filtered, id: \.id) { recipe in
                                 if isSelectionMode {
                                     Button {
                                         toggleRecipeSelection(recipe.id)
@@ -351,7 +379,6 @@ struct RecipeListView: View {
             }
             .padding(.bottom, 32)
         }
-        .scrollIndicators(.hidden)
     }
 
     private var heroHeader: some View {
@@ -650,6 +677,7 @@ struct RecipeListView: View {
         } label: {
             Image(systemName: "square.and.arrow.down")
         }
+        .accessibilityLabel("Import recipes")
     }
 
     private var filterMenu: some View {
@@ -661,6 +689,13 @@ struct RecipeListView: View {
             }
         } label: {
             Image(systemName: "line.3.horizontal.decrease.circle")
+        }
+        .accessibilityLabel("Sort recipes")
+    }
+
+    private func clearSelectionOnFilterChange() {
+        if isSelectionMode {
+            selectedRecipeIDs.removeAll()
         }
     }
 
@@ -701,6 +736,7 @@ struct RecipeListView: View {
             return
         }
 
+        let deletedIDs = toDelete.map(\.id)
         for recipe in toDelete {
             modelContext.delete(recipe)
         }
@@ -714,9 +750,7 @@ struct RecipeListView: View {
             return
         }
 
-        for recipe in toDelete {
-            SpotlightIndexingService.shared.removeRecipe(recipe)
-        }
+        SpotlightIndexingService.shared.removeRecipes(ids: deletedIDs)
 
         AnalyticsService.shared.track("recipes_bulk_deleted", metadata: [
             "count": "\(count)"

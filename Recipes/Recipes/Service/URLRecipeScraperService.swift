@@ -37,21 +37,45 @@ class URLRecipeScraperService: ObservableObject {
         
         // Fetch page HTML. The redirect guard re-checks each hop's host so a
         // safe-looking URL can't bounce us onto a private/metadata endpoint.
+        // Streamed with a hard byte ceiling so a huge or malicious response
+        // can't balloon memory before we ever look at it.
         statusMessage = "Fetching page..."
-        let (data, response) = try await urlSession.data(from: url, delegate: redirectGuard)
-        
+        let (bytes, response) = try await urlSession.bytes(from: url, delegate: redirectGuard)
+
         guard let httpResponse = response as? HTTPURLResponse,
               (200...299).contains(httpResponse.statusCode) else {
             throw ScraperError.fetchFailed
         }
-        
+
+        // Refuse clearly non-page payloads (media, archives, file downloads)
+        // before buffering them.
+        if let mime = httpResponse.mimeType?.lowercased(),
+           mime.hasPrefix("image/") || mime.hasPrefix("video/") || mime.hasPrefix("audio/")
+            || mime == "application/octet-stream" || mime == "application/zip"
+            || mime == "application/pdf" {
+            throw ScraperError.unsupportedContent
+        }
+
+        let maxPageBytes = 10 * 1024 * 1024
+        if httpResponse.expectedContentLength > Int64(maxPageBytes) {
+            throw ScraperError.pageTooLarge
+        }
+        var data = Data()
+        data.reserveCapacity(min(Int(max(httpResponse.expectedContentLength, 0)), maxPageBytes))
+        for try await byte in bytes {
+            data.append(byte)
+            if data.count > maxPageBytes { throw ScraperError.pageTooLarge }
+        }
+
         let html: String
         if let utf8 = String(data: data, encoding: .utf8) {
             html = utf8
-        } else if let latin1 = String(data: data, encoding: .isoLatin1) {
-            // Latin-1 accepts any byte sequence, so legacy-encoded pages
-            // (Windows-1252 etc.) still import instead of failing outright.
-            html = latin1
+        } else if let cp1252 = String(data: data, encoding: .windowsCP1252) {
+            // Windows-1252 accepts any byte sequence, so legacy-encoded pages
+            // still import instead of failing outright — and unlike Latin-1 it
+            // maps 0x80-0x9F to real curly quotes/dashes rather than C1
+            // control characters.
+            html = cp1252
         } else {
             throw ScraperError.decodeFailed
         }
@@ -67,6 +91,10 @@ class URLRecipeScraperService: ObservableObject {
         if allowAI && !apiKey.isEmpty {
             statusMessage = "No structured data found. Sending to Claude for extraction..."
             let cleanedText = stripHTML(html)
+            if cleanedText.count > aiCharacterBudget {
+                let percentTrimmed = Int(Double(cleanedText.count - aiCharacterBudget) / Double(cleanedText.count) * 100)
+                lastError = "This page is long — about \(percentTrimmed)% of its text was trimmed before AI extraction, so parts of the recipe may be missing. Review the result carefully."
+            }
             return try await aiExtract(text: cleanedText, sourceURL: url.absoluteString)
         }
         
@@ -172,11 +200,24 @@ class URLRecipeScraperService: ObservableObject {
         let prepTime = parseDuration(json["prepTime"] as? String)
         let cookTime = parseDuration(json["cookTime"] as? String)
         
-        // Parse ingredients
-        let ingredientStrings = json["recipeIngredient"] as? [String] ?? []
-        let ingredients = ingredientStrings.map { str -> Ingredient in
-            parseIngredientString(str)
-        }
+        // Parse ingredients. schema.org allows an array of strings, but real
+        // pages also emit a single string, mixed arrays containing nulls, or
+        // the legacy "ingredients" key — a strict [String] cast dropped every
+        // ingredient in those cases.
+        let rawIngredients = json["recipeIngredient"] ?? json["ingredients"]
+        let ingredientStrings: [String] = {
+            if let list = rawIngredients as? [Any] {
+                return list.compactMap { $0 as? String }
+            }
+            if let single = rawIngredients as? String {
+                return single.components(separatedBy: .newlines)
+            }
+            return []
+        }()
+        let ingredients = ingredientStrings
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .map { parseIngredientString($0) }
         
         // Parse instructions. Handles plain strings, arrays of strings,
         // HowToStep objects, and HowToSection groups (whose steps live in
@@ -207,22 +248,44 @@ class URLRecipeScraperService: ObservableObject {
                 .map { RecipeStep(order: $0.offset + 1, instruction: $0.element) }
         }()
         
-        // Parse category
-        let categoryStr = (json["recipeCategory"] as? String)?.lowercased() ?? ""
+        // A structurally-valid Recipe node with no ingredients AND no steps is
+        // a stub (carousel/roundup entry, or a shape this parser can't read).
+        // Treat it as a failure so a later node on the same page — or the AI
+        // fallback — gets its chance, instead of "succeeding" with an empty
+        // recipe that blocks the better strategies.
+        guard !ingredients.isEmpty || !steps.isEmpty else {
+            throw ScraperError.parseError
+        }
+
+        // Parse category. WP Recipe Maker and friends emit ["Dinner"] rather
+        // than "Dinner".
+        let categoryStr: String = {
+            if let s = json["recipeCategory"] as? String { return s.lowercased() }
+            if let arr = json["recipeCategory"] as? [Any], let first = arr.first as? String {
+                return first.lowercased()
+            }
+            return ""
+        }()
         let category = RecipeCategory(rawValue: categoryStr) ?? guessCategory(categoryStr)
-        
+
         // Parse cuisine
-        let cuisine = json["recipeCuisine"] as? String
-            ?? (json["recipeCuisine"] as? [String])?.first
-            ?? ""
-        
+        let cuisine = cleanHTMLEntities(
+            (json["recipeCuisine"] as? String)
+                ?? (json["recipeCuisine"] as? [Any])?.compactMap { $0 as? String }.first
+                ?? ""
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+
         // Parse keywords/tags
         let tags: [String] = {
             if let keywords = json["keywords"] as? String {
-                return keywords.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+                return keywords.split(separator: ",")
+                    .map { cleanHTMLEntities(String($0)).trimmingCharacters(in: .whitespaces) }
+                    .filter { !$0.isEmpty }
             }
-            if let keywords = json["keywords"] as? [String] {
-                return keywords
+            if let keywords = json["keywords"] as? [Any] {
+                return keywords.compactMap { $0 as? String }
+                    .map { cleanHTMLEntities($0).trimmingCharacters(in: .whitespaces) }
+                    .filter { !$0.isEmpty }
             }
             return []
         }()
@@ -301,6 +364,9 @@ class URLRecipeScraperService: ObservableObject {
         AIModelSettings.currentModelID
     }
 
+    /// How much page text is sent to the AI extractor before trimming.
+    private let aiCharacterBudget = 10_000
+
     private func aiExtract(text: String, sourceURL: String) async throws -> Recipe {
         guard !apiKey.isEmpty else {
             throw ScraperError.apiError("no API key is configured")
@@ -310,7 +376,7 @@ class URLRecipeScraperService: ObservableObject {
             throw ScraperError.apiError(nil)
         }
 
-        let truncated = String(text.prefix(10000))
+        let truncated = String(text.prefix(aiCharacterBudget))
 
         let systemPrompt = """
         You are a recipe extraction assistant. Extract the recipe from this web page text and return ONLY a JSON object (no markdown, no backticks) with this structure:
@@ -372,6 +438,9 @@ class URLRecipeScraperService: ObservableObject {
         }
 
         let parsed = try JSONDecoder().decode(AIParsedRecipe.self, from: recipeData)
+        guard !(parsed.ingredients.isEmpty && parsed.steps.isEmpty) else {
+            throw ScraperError.apiError("the AI response did not contain a usable recipe")
+        }
         return parsed.toRecipe(sourceType: .aiParsed, sourceURL: sourceURL)
     }
     
@@ -417,10 +486,13 @@ class URLRecipeScraperService: ObservableObject {
             timePart = ""
         }
 
-        func number(before designator: Character, in text: Substring) -> Int {
-            let pattern = "(\\d+)\(designator)"
+        // Fractional components ("PT0.5H", "PT1.5H") are legal ISO 8601 and do
+        // appear in the wild; matching only the integer digits would read
+        // "PT0.5H" as 5 hours.
+        func number(before designator: Character, in text: Substring) -> Double {
+            let pattern = "(\\d+(?:\\.\\d+)?)\(designator)"
             guard let match = text.range(of: pattern, options: .regularExpression) else { return 0 }
-            return Int(text[match].dropLast()) ?? 0
+            return Double(text[match].dropLast()) ?? 0
         }
 
         let days = number(before: "D", in: datePart)
@@ -428,7 +500,8 @@ class URLRecipeScraperService: ObservableObject {
         let minutes = number(before: "M", in: timePart)
         let seconds = number(before: "S", in: timePart)
 
-        return days * 24 * 60 + hours * 60 + minutes + (seconds >= 30 ? 1 : 0)
+        let totalMinutes = days * 24 * 60 + hours * 60 + minutes + seconds / 60
+        return max(0, Int(totalMinutes.rounded()))
     }
     
     /// Parse an ingredient string like "2 cups all-purpose flour" into
@@ -569,12 +642,26 @@ enum URLSafetyValidator {
         if host == "localhost" || host.hasSuffix(".localhost") { return true }
         if host.hasSuffix(".local") || host.hasSuffix(".internal") { return true }
 
-        // IPv6 loopback / unspecified / link-local / unique-local (fc00::/7).
+        // IPv6: parse to numeric groups so expanded/alternate spellings
+        // ("[0:0:0:0:0:0:0:1]", "[0:0:0:0:0:ffff:127.0.0.1]") can't slip past
+        // the textual prefixes they're equivalent to.
         if host.contains(":") {
-            if host == "::1" || host == "::" { return true }
-            if host.hasPrefix("fe80:") { return true }          // link-local
-            if host.hasPrefix("fc") || host.hasPrefix("fd") { return true } // ULA
-            if host.hasPrefix("::ffff:") { return true }         // IPv4-mapped
+            guard let groups = parseIPv6Groups(host) else {
+                // Not a valid IPv6 literal, and hostnames can't contain ":" —
+                // block conservatively.
+                return true
+            }
+            if groups.allSatisfy({ $0 == 0 }) { return true }                        // :: unspecified
+            if groups[0..<7].allSatisfy({ $0 == 0 }) && groups[7] == 1 { return true } // ::1 loopback
+            if groups[0] & 0xffc0 == 0xfe80 { return true }  // link-local fe80::/10
+            if groups[0] & 0xffc0 == 0xfec0 { return true }  // site-local fec0::/10
+            if groups[0] & 0xfe00 == 0xfc00 { return true }  // unique-local fc00::/7
+            // IPv4-mapped (::ffff:a.b.c.d) or IPv4-compatible (::a.b.c.d):
+            // judge the embedded IPv4 by the dotted-quad rules below.
+            if groups[0..<5].allSatisfy({ $0 == 0 }), groups[5] == 0xffff || groups[5] == 0 {
+                let embedded = "\(groups[6] >> 8).\(groups[6] & 0xff).\(groups[7] >> 8).\(groups[7] & 0xff)"
+                return isBlockedHost(embedded)
+            }
             return false
         }
 
@@ -614,6 +701,58 @@ enum URLSafetyValidator {
 
         return false
     }
+
+    /// Parses an IPv6 literal (optionally with an embedded dotted-quad tail
+    /// or a %zone suffix) into its eight 16-bit groups. Returns nil when the
+    /// text isn't a valid IPv6 address. Pure Swift so the classification
+    /// above works on the numeric value rather than easily-bypassed string
+    /// prefixes.
+    static func parseIPv6Groups(_ literal: String) -> [UInt16]? {
+        var text = literal
+        if let zoneIndex = text.firstIndex(of: "%") {
+            text = String(text[..<zoneIndex])
+        }
+        guard text.contains(":") else { return nil }
+
+        // Convert an embedded IPv4 tail ("::ffff:127.0.0.1") into two hex
+        // groups so the rest of the parser only sees colon-separated groups.
+        if text.contains(".") {
+            guard let lastColon = text.lastIndex(of: ":") else { return nil }
+            let v4Part = text[text.index(after: lastColon)...]
+            let octets = v4Part.split(separator: ".", omittingEmptySubsequences: false)
+                .map { UInt8($0) }
+            guard octets.count == 4, !octets.contains(nil) else { return nil }
+            let o = octets.compactMap { $0 }
+            let high = String(format: "%x", Int(o[0]) << 8 | Int(o[1]))
+            let low = String(format: "%x", Int(o[2]) << 8 | Int(o[3]))
+            text = String(text[...lastColon]) + high + ":" + low
+        }
+
+        func groups(from side: String) -> [UInt16]? {
+            guard !side.isEmpty else { return [] }
+            var result: [UInt16] = []
+            for part in side.split(separator: ":", omittingEmptySubsequences: false) {
+                guard !part.isEmpty, part.count <= 4, let value = UInt16(part, radix: 16) else {
+                    return nil
+                }
+                result.append(value)
+            }
+            return result
+        }
+
+        let sides = text.components(separatedBy: "::")
+        if sides.count == 1 {
+            guard let full = groups(from: sides[0]), full.count == 8 else { return nil }
+            return full
+        }
+        if sides.count == 2 {
+            guard let left = groups(from: sides[0]),
+                  let right = groups(from: sides[1]),
+                  left.count + right.count <= 7 else { return nil }
+            return left + Array(repeating: 0, count: 8 - left.count - right.count) + right
+        }
+        return nil
+    }
 }
 
 /// Per-task delegate that cancels any redirect to a host that wouldn't have
@@ -640,6 +779,7 @@ final class SSRFRedirectGuard: NSObject, URLSessionTaskDelegate {
 
 enum ScraperError: LocalizedError {
     case invalidURL, blockedHost, fetchFailed, decodeFailed, noStructuredData, parseError, notRecipeType
+    case pageTooLarge, unsupportedContent
     case apiError(String?)
 
     var errorDescription: String? {
@@ -648,6 +788,8 @@ enum ScraperError: LocalizedError {
         case .blockedHost: return "Local/private network URLs are blocked for safety"
         case .fetchFailed: return "Could not fetch the page"
         case .decodeFailed: return "Could not read page content"
+        case .pageTooLarge: return "The page is too large to import (over 10 MB)"
+        case .unsupportedContent: return "This link points to a file download, not a web page"
         case .noStructuredData: return "No structured recipe data found"
         case .parseError: return "Could not parse recipe data"
         case .notRecipeType: return "Structured data is not a Recipe type"

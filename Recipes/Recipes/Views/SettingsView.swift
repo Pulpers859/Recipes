@@ -21,10 +21,14 @@ struct SettingsView: View {
     @State private var importResult: String?
     @State private var showShareSheet = false
     @State private var shareURL: URL?
-    @State private var syncResult: String?
     @State private var showDeleteAllConfirm = false
+    @State private var showResolveConfirm = false
     @State private var apiKeySource: APIKeyStore.KeySource?
     @State private var apiKeyMessage: String?
+    /// Maintenance-card banner with an explicit error flag — tone must never
+    /// be guessed by string-sniffing (a failed delete once rendered green).
+    @State private var maintenanceMessage: (text: String, isError: Bool)?
+    @State private var archivedStores: [ArchivedStore] = []
 
     var body: some View {
         NavigationStack {
@@ -74,12 +78,36 @@ struct SettingsView: View {
                 AIModelSettings.migrateStoredModelIfNeeded()
                 loadAPIKeyIfNeeded()
                 AnalyticsService.shared.setAnalyticsEnabled(analyticsEnabled)
+                // Directory listing + file attribute reads don't belong in
+                // body; load once and refresh when an export changes things.
+                archivedStores = Self.listArchivedStores()
+            }
+            // Status banners fade after a bit instead of sticking around
+            // forever ("Exported 42 recipes" three days later reads as stale
+            // state). Errors stay longer so they can be read and acted on.
+            .onChange(of: exportMessage) { _, newValue in
+                scheduleBannerClear(newValue) { if exportMessage == newValue { exportMessage = nil } }
+            }
+            .onChange(of: importResult) { _, newValue in
+                scheduleBannerClear(newValue) { if importResult == newValue { importResult = nil } }
+            }
+            .onChange(of: apiKeyMessage) { _, newValue in
+                scheduleBannerClear(newValue) { if apiKeyMessage == newValue { apiKeyMessage = nil } }
+            }
+            .onChange(of: maintenanceMessage?.text) { _, newValue in
+                scheduleBannerClear(newValue) { if maintenanceMessage?.text == newValue { withAnimation { maintenanceMessage = nil } } }
             }
             .alert("Delete all recipes?", isPresented: $showDeleteAllConfirm) {
                 Button("Delete All", role: .destructive) { deleteAllRecipes() }
                 Button("Cancel", role: .cancel) { }
             } message: {
-                Text("This will permanently delete all \(recipes.count) recipe(s). A safety backup will be saved on this device first.")
+                Text("This will permanently delete all \(recipes.count) recipe(s) and clear their meal plan entries. A safety backup of the recipes (meal plans are not included) is saved on this device first.")
+            }
+            .alert("Resolve duplicate recipes?", isPresented: $showResolveConfirm) {
+                Button("Resolve Duplicates", role: .destructive) { resolveConflicts() }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("Recipes with the same title and ingredients are merged, and the duplicates are permanently deleted. A safety backup is saved on this device first.")
             }
         }
     }
@@ -165,7 +193,7 @@ struct SettingsView: View {
             }
 
             RVStatusBanner(
-                message: "Keys are stored in the iOS Keychain or supplied by build settings. Never commit a real key to source control.",
+                message: "Keys are stored in the iOS Keychain (or a development environment variable). Never commit a real key to source control.",
                 tone: .info
             )
         }
@@ -223,12 +251,12 @@ struct SettingsView: View {
                 subtitle: "Repair duplicate imports and handle destructive cleanup with a backup-first posture."
             )
 
-            settingsAction("Resolve Duplicate Recipes", systemImage: "arrow.triangle.merge") {
-                resolveConflicts()
+            settingsAction("Resolve Duplicate Recipes", systemImage: "arrow.triangle.merge", disabled: recipes.isEmpty) {
+                showResolveConfirm = true
             }
 
-            if let syncResult {
-                RVStatusBanner(message: syncResult, tone: .info)
+            if let maintenanceMessage {
+                RVStatusBanner(message: maintenanceMessage.text, tone: maintenanceMessage.isError ? .danger : .success)
             }
 
             Button(role: .destructive) {
@@ -292,7 +320,7 @@ struct SettingsView: View {
                 subtitle: "If the app had to reset your library, archived copies of the old data may be available here."
             )
 
-            let archives = Self.listArchivedStores()
+            let archives = archivedStores
             if archives.isEmpty {
                 HStack(spacing: 10) {
                     Image(systemName: "checkmark.circle.fill")
@@ -334,6 +362,7 @@ struct SettingsView: View {
     private struct ArchivedStore {
         let timestamp: Int
         let path: URL
+        let sizeText: String
         var displayDate: String {
             let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
             let formatter = DateFormatter()
@@ -341,12 +370,16 @@ struct SettingsView: View {
             formatter.timeStyle = .short
             return formatter.string(from: date)
         }
-        var sizeText: String {
+
+        init(timestamp: Int, path: URL) {
+            self.timestamp = timestamp
+            self.path = path
             let size = (try? FileManager.default.attributesOfItem(atPath: path.path)[.size] as? Int) ?? 0
             if size > 1_000_000 {
-                return String(format: "%.1f MB", Double(size) / 1_000_000)
+                sizeText = String(format: "%.1f MB", Double(size) / 1_000_000)
+            } else {
+                sizeText = "\(size / 1_000) KB"
             }
-            return "\(size / 1_000) KB"
         }
     }
 
@@ -376,10 +409,13 @@ struct SettingsView: View {
     private func exportArchivedStore(_ archive: ArchivedStore) {
         do {
             let schema = Schema([Recipe.self, MealPlan.self, ShoppingItem.self, PantryItem.self])
+            // Read-only: opening the archive read-write can mutate it (WAL
+            // sidecars), and this archive may be the only copy of lost data.
             let config = ModelConfiguration(
                 "RecoveryRead",
                 schema: schema,
                 url: archive.path,
+                allowsSave: false,
                 cloudKitDatabase: .none
             )
             let container = try ModelContainer(for: schema, configurations: config)
@@ -597,20 +633,35 @@ struct SettingsView: View {
         case .keychain:
             return "Active from app storage"
         case .bundledConfig:
-            return "Active from Xcode config"
+            return "Active from development environment"
         case .none:
             return "Not configured"
         }
     }
+
+    /// Clears a status banner after a delay: 12 s for errors (they need to be
+    /// read), 6 s for confirmations.
+    private func scheduleBannerClear(_ newValue: String?, clear: @escaping () -> Void) {
+        guard let newValue else { return }
+        let isError = newValue.lowercased().contains("could not")
+            || newValue.lowercased().contains("failed")
+            || newValue.lowercased().contains("nothing was")
+            || newValue.lowercased().contains("warning")
+        Task {
+            try? await Task.sleep(for: .seconds(isError ? 12 : 6))
+            withAnimation { clear() }
+        }
+    }
     
     private func deleteAllRecipes() {
-        if let message = RecipeLibraryMaintenance.deleteAllRecipes(recipes, modelContext: modelContext) {
-            importResult = message
+        if let outcome = RecipeLibraryMaintenance.deleteAllRecipes(recipes, modelContext: modelContext) {
+            maintenanceMessage = (outcome.message, outcome.isError)
         }
     }
 
     private func resolveConflicts() {
-        syncResult = RecipeLibraryMaintenance.resolveConflicts(recipes, modelContext: modelContext)
+        let outcome = RecipeLibraryMaintenance.resolveConflicts(recipes, modelContext: modelContext)
+        maintenanceMessage = (outcome.message, outcome.isError)
     }
 
 }

@@ -31,14 +31,27 @@ class ShoppingListService {
         
         for entry in entries {
             let scaled = entry.recipe.scaledIngredients(for: entry.servings)
-            
+
             for ingredient in scaled {
-                let key = mergeKey(name: ingredient.name)
-                
+                let baseKey = mergeKey(name: ingredient.name)
+                let normalizedUnit = normalizeUnit(ingredient.unit)
+
+                // Combine amounts only when the units are actually
+                // compatible. When they aren't ("2 cup flour" vs "500 g
+                // flour"), keep a separate unit-scoped line item — the old
+                // behavior silently DROPPED the incoming amount, so the list
+                // under-stated what to buy.
+                var key = baseKey
+                if let existing = aggregated[baseKey],
+                   convertToCommonUnit(
+                       amount: ingredient.amount,
+                       unit: ingredient.unit,
+                       targetUnit: existing.unit
+                   ) == nil {
+                    key = "\(baseKey)|\(normalizedUnit)"
+                }
+
                 if var existing = aggregated[key] {
-                    // Combine amounts only when the units are actually
-                    // compatible — otherwise adding "3 clove" to "2 cup"
-                    // would silently corrupt the quantity.
                     if let converted = convertToCommonUnit(
                         amount: ingredient.amount,
                         unit: ingredient.unit,
@@ -52,13 +65,13 @@ class ShoppingListService {
                     }
                     aggregated[key] = existing
                 } else {
-                    let normalizedUnit = normalizeUnit(ingredient.unit)
                     aggregated[key] = AggregatedIngredient(
                         displayName: cleanDisplayName(ingredient.name),
                         amount: ingredient.amount,
                         unit: normalizedUnit,
                         category: categorize(ingredient: ingredient.name),
-                        recipeIDs: [entry.recipe.id]
+                        recipeIDs: [entry.recipe.id],
+                        pantryKey: baseKey
                     )
                 }
             }
@@ -83,10 +96,12 @@ class ShoppingListService {
             }
         }
         
-        for (key, originalData) in aggregated {
-            var data = originalData
+        // Deterministic order so pantry coverage is consumed consistently when
+        // the same ingredient appears under multiple unit-scoped entries.
+        for key in aggregated.keys.sorted() {
+            guard var data = aggregated[key] else { continue }
             let startingAmount = data.amount
-            if let pantry = pantryLookup[key] {
+            if let pantry = pantryLookup[data.pantryKey] {
                 if pantry.isStaple {
                     continue
                 }
@@ -98,13 +113,23 @@ class ShoppingListService {
                        unit: pantry.unit,
                        targetUnit: data.unit
                    ) {
+                    let used = min(coverage.amount, data.amount)
                     data.amount = max(0, data.amount - coverage.amount)
+                    // Consume the applied stock so a second unit-variant of
+                    // the same ingredient can't double-count this coverage.
+                    if let usedInPantryUnit = convertToCommonUnit(
+                        amount: used,
+                        unit: data.unit,
+                        targetUnit: pantry.unit
+                    ) {
+                        pantryLookup[data.pantryKey]?.amount = max(0, pantry.amount - usedInPantryUnit.amount)
+                    }
                     if data.amount <= 0.0001 {
                         continue
                     }
                 }
             }
-            
+
             let item = ShoppingItem(
                 name: data.displayName,
                 amount: data.amount,
@@ -114,7 +139,7 @@ class ShoppingListService {
                 originalAmount: startingAmount,
                 pantryReductionAmount: max(0, startingAmount - data.amount)
             )
-            if checkedKeys.contains(key) {
+            if checkedKeys.contains(data.pantryKey) {
                 item.isChecked = true
             }
             modelContext.insert(item)
@@ -428,4 +453,7 @@ private struct AggregatedIngredient {
     var unit: String
     var category: ShoppingCategory
     var recipeIDs: [UUID]
+    /// Base ingredient key (no unit suffix) used for pantry-coverage and
+    /// checked-state lookups, since unit-scoped entries share one ingredient.
+    var pantryKey: String
 }

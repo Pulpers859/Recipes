@@ -84,7 +84,6 @@ enum MealPlanningService {
     /// planned meals follow the merged recipe instead of disappearing.
     static func retargetEntries(fromRecipeID oldID: UUID, to canonical: Recipe, modelContext: ModelContext) {
         let plans = (try? modelContext.fetch(FetchDescriptor<MealPlan>())) ?? []
-        var didChange = false
         for plan in plans {
             guard plan.entries.contains(where: { $0.recipeID == oldID }) else { continue }
             var entries = plan.entries
@@ -93,7 +92,6 @@ enum MealPlanningService {
                 entries[index].recipeTitle = canonical.title
             }
             plan.entries = entries
-            didChange = true
         }
         // Caller owns the final save — do not save here to preserve atomicity
         // with the surrounding conflict-resolution or delete transaction.

@@ -14,6 +14,8 @@ struct CookingModeView: View {
     @State private var showIngredients = false
     @State private var showFinishOptions = false
     @State private var showTimerDismissWarning = false
+    @State private var showNotificationDeniedNotice = false
+    @State private var saveErrorMessage: String?
     
     private var sortedSteps: [RecipeStep] {
         recipe.steps.sorted { $0.order < $1.order }
@@ -135,6 +137,17 @@ struct CookingModeView: View {
                     Spacer()
                 }
                 
+                // Timers can't alert a locked phone without notifications;
+                // say so once instead of letting the cook find out the hard way.
+                if showNotificationDeniedNotice {
+                    Text("Notifications are off, so timers can't alert you while the phone is locked. Enable them in Settings → Notifications → Recipe Vault.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 8)
+                }
+
                 // Active timers bar
                 if !activeTimers.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
@@ -184,25 +197,52 @@ struct CookingModeView: View {
             Button("Keep Cooking", role: .cancel) { }
         } message: {
             let count = activeTimers.values.filter(\.isRunning).count
-            Text("You have \(count) active timer\(count == 1 ? "" : "s"). Leaving will stop \(count == 1 ? "it" : "them").")
+            // The countdown display closes, but the scheduled notifications
+            // are deliberately kept — the copy must match that behavior.
+            Text("You have \(count) active timer\(count == 1 ? "" : "s"). The countdown display will close, but you'll still get a notification when \(count == 1 ? "it finishes" : "each one finishes").")
         }
         .confirmationDialog("Finished cooking?", isPresented: $showFinishOptions, titleVisibility: .visible) {
             Button("Mark as Cooked & Close") {
-                recipe.timesCooked += 1
-                recipe.dateLastCooked = Date()
-                try? recipe.modelContext?.save()
-                dismiss()
+                markAsCookedAndClose()
             }
             Button("Close Without Marking") {
                 dismiss()
             }
             Button("Keep Cooking", role: .cancel) { }
         }
+        .alert("Couldn’t Save", isPresented: Binding(
+            get: { saveErrorMessage != nil },
+            set: { if !$0 { saveErrorMessage = nil } }
+        )) {
+            Button("Close Anyway", role: .destructive) { dismiss() }
+            Button("Stay", role: .cancel) { saveErrorMessage = nil }
+        } message: {
+            Text(saveErrorMessage ?? "An unknown error occurred.")
+        }
     }
     
     private var progressFraction: CGFloat {
         guard sortedSteps.count > 0 else { return 0 }
         return CGFloat(currentStepIndex + 1) / CGFloat(sortedSteps.count)
+    }
+
+    /// The cook count is real user data — a `try?` here made the cover
+    /// dismiss looking successful while the save silently failed.
+    private func markAsCookedAndClose() {
+        recipe.timesCooked += 1
+        recipe.dateLastCooked = Date()
+        guard let context = recipe.modelContext else {
+            dismiss()
+            return
+        }
+        do {
+            try context.save()
+            dismiss()
+        } catch {
+            context.rollback()
+            saveErrorMessage = "The cook couldn't be recorded: \(error.localizedDescription)"
+            AnalyticsService.shared.track("cook_count_save_failed")
+        }
     }
     
     // MARK: - Timer View
@@ -253,6 +293,14 @@ struct CookingModeView: View {
                     // A local notification is the only completion signal that
                     // reaches the cook when the phone is locked or face-down.
                     TimerNotificationService.shared.requestAuthorizationIfNeeded()
+                    // Slight delay so a just-answered permission prompt is
+                    // reflected before we decide whether to warn.
+                    Task {
+                        try? await Task.sleep(for: .seconds(1))
+                        if TimerNotificationService.shared.isNotificationDenied {
+                            withAnimation { showNotificationDeniedNotice = true }
+                        }
+                    }
                     TimerNotificationService.shared.scheduleTimerNotification(
                         stepID: step.id,
                         label: state.label,

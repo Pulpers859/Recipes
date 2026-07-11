@@ -118,6 +118,13 @@ struct MealPlanView: View {
             .navigationDestination(for: UUID.self) { recipeID in
                 if let recipe = allRecipes.first(where: { $0.id == recipeID }) {
                     RecipeDetailView(recipe: recipe)
+                } else {
+                    // A tap racing a delete pushed a blank screen here.
+                    ContentUnavailableView(
+                        "Recipe Not Found",
+                        systemImage: "questionmark.circle",
+                        description: Text("This recipe may have been deleted.")
+                    )
                 }
             }
             .onAppear {
@@ -343,6 +350,7 @@ struct MealPlanView: View {
                     .foregroundStyle(Color.rvMuted)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Remove \(entry.recipeTitle) from plan")
         }
         .padding(14)
         .background(Color.rvSurface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))

@@ -76,9 +76,21 @@ class SpotlightIndexingService {
     
     // MARK: - Remove from Index
     
+    /// Prefer the id-based variant at delete call sites: reading properties
+    /// of an already-deleted-and-saved @Model can crash, so capture the UUID
+    /// before `modelContext.delete`.
     func removeRecipe(_ recipe: Recipe) {
+        removeRecipe(id: recipe.id)
+    }
+
+    func removeRecipe(id: UUID) {
+        removeRecipes(ids: [id])
+    }
+
+    func removeRecipes(ids: [UUID]) {
+        guard !ids.isEmpty else { return }
         CSSearchableIndex.default().deleteSearchableItems(
-            withIdentifiers: [recipe.id.uuidString]
+            withIdentifiers: ids.map { $0.uuidString }
         ) { error in
             if let error {
                 #if DEBUG

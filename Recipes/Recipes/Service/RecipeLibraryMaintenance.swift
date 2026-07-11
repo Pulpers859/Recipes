@@ -67,7 +67,8 @@ enum RecipeLibraryMaintenance {
             throw MaintenanceError.notValidJSON
         }
 
-        let imported = try RecipeExportService.importFromJSON(data: data)
+        let importResult = try RecipeExportService.importFromJSON(data: data)
+        let imported = importResult.recipes
         var existingFingerprints = Set(existingRecipes.map(fingerprint))
         let existingIDs = Set(existingRecipes.map(\.id))
         var insertedCount = 0
@@ -100,22 +101,33 @@ enum RecipeLibraryMaintenance {
             "skipped": "\(skippedCount)"
         ])
 
-        if skippedCount > 0 {
-            return "Imported \(insertedCount) recipes (\(skippedCount) duplicates skipped)."
-        } else {
-            return "Imported \(insertedCount) recipes successfully!"
+        var message = skippedCount > 0
+            ? "Imported \(insertedCount) recipes (\(skippedCount) duplicates skipped)."
+            : "Imported \(insertedCount) recipes successfully!"
+        if importResult.unreadableCount > 0 {
+            // A partial import must never read as a full success.
+            message += " Warning: \(importResult.unreadableCount) record\(importResult.unreadableCount == 1 ? "" : "s") in the file could not be read and \(importResult.unreadableCount == 1 ? "was" : "were") NOT imported."
         }
+        return message
+    }
+
+    /// Outcome of a maintenance action: the user-facing message plus an
+    /// explicit success flag, so the UI never has to sniff strings to decide
+    /// whether to render a success or failure banner.
+    struct MaintenanceOutcome {
+        let message: String
+        let isError: Bool
     }
 
     // MARK: - Delete All
 
     /// Backs up, cleans up meal-plan entries, then deletes every recipe. Never
-    /// throws: returns the message to show whether it succeeded or bailed early
+    /// throws: returns the outcome to show whether it succeeded or bailed early
     /// (each early exit leaves the store untouched, as before).
     static func deleteAllRecipes(
         _ recipes: [Recipe],
         modelContext: ModelContext
-    ) -> String? {
+    ) -> MaintenanceOutcome? {
         let count = recipes.count
         guard count > 0 else { return nil }
 
@@ -125,7 +137,7 @@ enum RecipeLibraryMaintenance {
             try RecipeExportService.writeAutomaticBackup(recipes: recipes)
         } catch {
             AnalyticsService.shared.track("recipes_delete_all_backup_failed")
-            return "Nothing was deleted because the safety backup could not be written."
+            return MaintenanceOutcome(message: "Nothing was deleted because the safety backup could not be written.", isError: true)
         }
 
         // Meal-plan entries for deleted recipes would linger in the plan UI
@@ -138,7 +150,7 @@ enum RecipeLibraryMaintenance {
         } catch {
             modelContext.rollback()
             AnalyticsService.shared.track("recipes_delete_all_plan_cleanup_failed")
-            return "Nothing was deleted because meal plan cleanup could not be saved: \(error.localizedDescription)"
+            return MaintenanceOutcome(message: "Nothing was deleted because meal plan cleanup could not be saved: \(error.localizedDescription)", isError: true)
         }
 
         for recipe in recipes {
@@ -150,31 +162,49 @@ enum RecipeLibraryMaintenance {
         } catch {
             modelContext.rollback()
             AnalyticsService.shared.track("recipes_delete_all_save_failed")
-            return "The recipes were not deleted because the change could not be saved: \(error.localizedDescription)"
+            return MaintenanceOutcome(message: "The recipes were not deleted because the change could not be saved: \(error.localizedDescription)", isError: true)
         }
 
         SpotlightIndexingService.shared.removeAllRecipes()
 
         AnalyticsService.shared.track("recipes_all_deleted", metadata: ["count": "\(count)"])
-        return "Deleted \(count) recipes. A safety backup was saved on this device."
+        return MaintenanceOutcome(message: "Deleted \(count) recipes. A safety backup was saved on this device.", isError: false)
     }
 
     // MARK: - Duplicate Resolution
 
     /// Resolves duplicate recipe conflicts and persists the result. Never
-    /// throws: returns the message to show.
+    /// throws: returns the outcome to show. Writes the same safety backup as
+    /// the other destructive paths BEFORE deleting anything — resolution
+    /// permanently removes recipes, and a wrong merge needs a recovery story.
     static func resolveConflicts(
         _ recipes: [Recipe],
         modelContext: ModelContext
-    ) -> String {
+    ) -> MaintenanceOutcome {
+        guard !recipes.isEmpty else {
+            return MaintenanceOutcome(message: "No recipes to check for duplicates.", isError: false)
+        }
+
+        do {
+            try RecipeExportService.writeAutomaticBackup(recipes: recipes)
+        } catch {
+            AnalyticsService.shared.track("resolve_recipe_conflicts_backup_failed")
+            return MaintenanceOutcome(message: "Duplicate cleanup did not run because the safety backup could not be written.", isError: true)
+        }
+
         let result = RecipeConflictResolverService.resolveRecipeConflicts(recipes: recipes, modelContext: modelContext)
         do {
             try modelContext.save()
         } catch {
             modelContext.rollback()
             AnalyticsService.shared.track("resolve_recipe_conflicts_save_failed")
-            return "Duplicate cleanup could not be saved: \(error.localizedDescription)"
+            return MaintenanceOutcome(message: "Duplicate cleanup could not be saved: \(error.localizedDescription)", isError: true)
         }
+
+        // Only after the deletes are durably saved do we drop the Spotlight
+        // entries — doing it earlier de-indexed recipes that a failed save
+        // then resurrected.
+        SpotlightIndexingService.shared.removeRecipes(ids: result.deletedRecipeIDs)
 
         AnalyticsService.shared.track("resolve_recipe_conflicts", metadata: [
             "merged_groups": "\(result.mergedRecipes)",
@@ -182,9 +212,9 @@ enum RecipeLibraryMaintenance {
         ])
 
         if result.deletedDuplicates == 0 {
-            return "No duplicate recipe conflicts found."
+            return MaintenanceOutcome(message: "No duplicate recipe conflicts found.", isError: false)
         } else {
-            return "Resolved \(result.mergedRecipes) conflict group(s), removed \(result.deletedDuplicates) duplicate recipes."
+            return MaintenanceOutcome(message: "Resolved \(result.mergedRecipes) conflict group(s), removed \(result.deletedDuplicates) duplicate recipes. A safety backup was saved first.", isError: false)
         }
     }
 }

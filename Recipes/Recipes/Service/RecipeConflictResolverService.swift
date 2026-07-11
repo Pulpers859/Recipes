@@ -4,57 +4,89 @@ import SwiftData
 struct ConflictResolutionResult {
     let mergedRecipes: Int
     let deletedDuplicates: Int
+    /// IDs of the deleted duplicates, so the caller can clean up external
+    /// state (Spotlight) AFTER its save succeeds — removing index entries
+    /// before the save could roll back left ghosts either way.
+    let deletedRecipeIDs: [UUID]
 }
 
 enum RecipeConflictResolverService {
     static func resolveRecipeConflicts(recipes: [Recipe], modelContext: ModelContext) -> ConflictResolutionResult {
-        let grouped = Dictionary(grouping: recipes, by: fingerprint)
         var mergedRecipes = 0
         var deletedDuplicates = 0
-        
-        for (_, group) in grouped where group.count > 1 {
-            // Deterministic winner: highest quality, then oldest (stable
-            // dateAdded), then id. Plain `max(by:)` over equal scores is
-            // arbitrary, which made *which* record survived — and therefore
-            // its dateAdded/id/spotlight entry — change run to run.
-            guard let canonical = group.max(by: { lhs, rhs in
-                let ls = qualityScore(lhs), rs = qualityScore(rhs)
-                if ls != rs { return ls < rs }
-                if lhs.dateAdded != rhs.dateAdded { return lhs.dateAdded > rhs.dateAdded }
-                return lhs.id.uuidString > rhs.id.uuidString
-            }) else { continue }
-            // A matching title alone is not proof of duplication — two distinct
-            // recipes can share a name. Only delete when the ingredients agree
-            // (or the recipes share an explicit source URL via the fingerprint).
-            let duplicates = group.filter {
-                $0.id != canonical.id && isConfidentDuplicate($0, of: canonical)
-            }
-            guard !duplicates.isEmpty else { continue }
+        var deletedIDs: [UUID] = []
+        var deletedIDSet = Set<UUID>()
 
-            for duplicate in duplicates {
-                merge(source: duplicate, into: canonical)
-                // Planned meals pointing at the duplicate follow the merged
-                // recipe instead of silently orphaning.
-                MealPlanningService.retargetEntries(
-                    fromRecipeID: duplicate.id,
-                    to: canonical,
-                    modelContext: modelContext
-                )
-                SpotlightIndexingService.shared.removeRecipe(duplicate)
-                modelContext.delete(duplicate)
-                deletedDuplicates += 1
-            }
+        func process(_ groups: [[Recipe]]) {
+            for group in groups {
+                let liveGroup = group.filter { !deletedIDSet.contains($0.id) }
+                guard liveGroup.count > 1 else { continue }
+                // Deterministic winner: highest quality, then oldest (stable
+                // dateAdded), then id. Plain `max(by:)` over equal scores is
+                // arbitrary, which made *which* record survived — and therefore
+                // its dateAdded/id/spotlight entry — change run to run.
+                guard let canonical = liveGroup.max(by: { lhs, rhs in
+                    let ls = qualityScore(lhs), rs = qualityScore(rhs)
+                    if ls != rs { return ls < rs }
+                    if lhs.dateAdded != rhs.dateAdded { return lhs.dateAdded > rhs.dateAdded }
+                    return lhs.id.uuidString > rhs.id.uuidString
+                }) else { continue }
+                // A matching group key alone is not proof of duplication.
+                // Only delete when the ingredients agree enough.
+                let duplicates = liveGroup.filter {
+                    $0.id != canonical.id && isConfidentDuplicate($0, of: canonical)
+                }
+                guard !duplicates.isEmpty else { continue }
 
-            mergedRecipes += 1
+                for duplicate in duplicates {
+                    merge(source: duplicate, into: canonical)
+                    // Planned meals pointing at the duplicate follow the merged
+                    // recipe instead of silently orphaning.
+                    MealPlanningService.retargetEntries(
+                        fromRecipeID: duplicate.id,
+                        to: canonical,
+                        modelContext: modelContext
+                    )
+                    deletedIDs.append(duplicate.id)
+                    deletedIDSet.insert(duplicate.id)
+                    modelContext.delete(duplicate)
+                    deletedDuplicates += 1
+                }
+
+                mergedRecipes += 1
+            }
         }
-        
-        return ConflictResolutionResult(mergedRecipes: mergedRecipes, deletedDuplicates: deletedDuplicates)
+
+        // Pass 1: exact duplicates — same title and identical normalized
+        // ingredient names (the shared library fingerprint).
+        process(Array(Dictionary(grouping: recipes, by: fingerprint).values))
+
+        // Pass 2: same title + same source URL. This catches the most common
+        // real duplicate — the same page re-imported with slightly different
+        // parsed ingredient names — which pass 1 can never group (its key IS
+        // the ingredient list). The overlap threshold below still protects
+        // deliberately edited variants.
+        let withURL = recipes.filter {
+            !deletedIDSet.contains($0.id)
+                && !($0.sourceURL ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        let byTitleAndURL = Dictionary(grouping: withURL) { recipe in
+            recipe.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                + "::"
+                + (recipe.sourceURL ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        }
+        process(Array(byTitleAndURL.values))
+
+        return ConflictResolutionResult(
+            mergedRecipes: mergedRecipes,
+            deletedDuplicates: deletedDuplicates,
+            deletedRecipeIDs: deletedIDs
+        )
     }
-    
-    /// Recipes in the same fingerprint group share title + source URL. When a
-    /// non-empty source URL matches, that's strong evidence of duplication.
-    /// For title-only matches, require the ingredient lists to substantially
-    /// overlap before destructively merging.
+
+    /// When a non-empty source URL matches, that's strong evidence of
+    /// duplication. For title-only matches, require the ingredient lists to
+    /// substantially overlap before destructively merging.
     private nonisolated static func isConfidentDuplicate(_ candidate: Recipe, of canonical: Recipe) -> Bool {
         let candidateKeys = ingredientKeySet(candidate)
         let canonicalKeys = ingredientKeySet(canonical)

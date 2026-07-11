@@ -9,7 +9,12 @@ struct RecipeEditorView: View {
     
     var recipe: Recipe
     let isNewImport: Bool
-    
+    /// Batch-import preview: edits apply to the in-memory recipe only. The
+    /// recipe must NOT be inserted into the model context here — the batch
+    /// review's "Save N Recipes" owns insertion, so a previewed-then-excluded
+    /// recipe never leaks into the library.
+    let isPreviewOnly: Bool
+
     // Local editing state
     @State private var title: String
     @State private var summary: String
@@ -29,16 +34,57 @@ struct RecipeEditorView: View {
     @State private var selectedPhotoIndex = 0
     @State private var saveErrorMessage: String?
     @State private var isLoadingPhotos = false
-    
+    @State private var photoLoadMessage: String?
+    @State private var showCancelConfirm = false
+
     @State private var newIngredientName = ""
     @State private var newIngredientAmount = ""
     @State private var newIngredientUnit = ""
-    
-    init(recipe: Recipe?, isNewImport: Bool = false) {
+
+    /// Snapshot of the editable fields taken at init, so Cancel can tell a
+    /// clean session from one with unsaved edits.
+    private struct EditorSnapshot: Equatable {
+        var title: String
+        var summary: String
+        var servings: Int
+        var prepTime: Int
+        var cookTime: Int
+        var category: RecipeCategory
+        var cuisine: String
+        var difficulty: Difficulty
+        var tagText: String
+        var notes: String
+        var ingredients: [Ingredient]
+        var steps: [RecipeStep]
+        var photoData: [Data]
+    }
+    private let initialSnapshot: EditorSnapshot
+
+    private var hasUnsavedChanges: Bool {
+        EditorSnapshot(
+            title: title, summary: summary, servings: servings,
+            prepTime: prepTime, cookTime: cookTime, category: category,
+            cuisine: cuisine, difficulty: difficulty, tagText: tagText,
+            notes: notes, ingredients: ingredients, steps: steps,
+            photoData: photoData
+        ) != initialSnapshot
+    }
+
+    init(recipe: Recipe?, isNewImport: Bool = false, isPreviewOnly: Bool = false) {
         let r = recipe ?? Recipe()
         self.recipe = r
         self.isNewImport = isNewImport
-        
+        self.isPreviewOnly = isPreviewOnly
+
+        let sortedSteps = r.steps.sorted { $0.order < $1.order }
+        initialSnapshot = EditorSnapshot(
+            title: r.title, summary: r.summary, servings: r.servings,
+            prepTime: r.prepTime, cookTime: r.cookTime, category: r.category,
+            cuisine: r.cuisine, difficulty: r.difficulty,
+            tagText: r.tags.joined(separator: ", "), notes: r.notes,
+            ingredients: r.ingredients, steps: sortedSteps, photoData: r.photoData
+        )
+
         _title = State(initialValue: r.title)
         _summary = State(initialValue: r.summary)
         _servings = State(initialValue: r.servings)
@@ -263,7 +309,15 @@ struct RecipeEditorView: View {
         .toolbarBackground(.visible, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
-                Button("Cancel") { cancelEditing() }
+                Button("Cancel") {
+                    // A mis-tap next to Save shouldn't silently throw away a
+                    // long edit (or a whole import). Confirm when it matters.
+                    if isNewImport || hasUnsavedChanges {
+                        showCancelConfirm = true
+                    } else {
+                        cancelEditing()
+                    }
+                }
             }
             ToolbarItem(placement: .confirmationAction) {
                 Button("Save") { saveRecipe() }
@@ -288,6 +342,22 @@ struct RecipeEditorView: View {
         } message: {
             Text(saveErrorMessage ?? "An unknown error occurred.")
         }
+        .alert("Some Photos Were Skipped", isPresented: Binding(
+            get: { photoLoadMessage != nil },
+            set: { if !$0 { photoLoadMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { photoLoadMessage = nil }
+        } message: {
+            Text(photoLoadMessage ?? "")
+        }
+        .alert(isNewImport && !isPreviewOnly ? "Discard This Import?" : "Discard Changes?", isPresented: $showCancelConfirm) {
+            Button("Discard", role: .destructive) { cancelEditing() }
+            Button("Keep Editing", role: .cancel) {}
+        } message: {
+            Text(isNewImport && !isPreviewOnly
+                 ? "This imported recipe will be removed from your library."
+                 : "Your edits will be lost.")
+        }
         // A swipe-down would silently discard every edit (or keep an
         // unreviewed import). Force an explicit Cancel/Save decision.
         .interactiveDismissDisabled()
@@ -299,11 +369,18 @@ struct RecipeEditorView: View {
     /// persist — cancelling the review must remove that recipe again, otherwise
     /// "Cancel" silently keeps an unreviewed import in the library.
     private func cancelEditing() {
+        // Preview edits live only in the pending batch array; nothing was
+        // inserted, so there is nothing to delete.
+        if isPreviewOnly {
+            dismiss()
+            return
+        }
         if isNewImport, recipe.modelContext != nil {
+            let recipeID = recipe.id
             modelContext.delete(recipe)
             do {
                 try modelContext.save()
-                SpotlightIndexingService.shared.removeRecipe(recipe)
+                SpotlightIndexingService.shared.removeRecipe(id: recipeID)
             } catch {
                 modelContext.rollback()
                 saveErrorMessage = "The unreviewed import could not be removed: \(error.localizedDescription)"
@@ -369,13 +446,24 @@ struct RecipeEditorView: View {
         recipe.ingredients = cleanedIngredients
         recipe.steps = cleanedSteps
         recipe.photoData = photoData
-        
+
+        // Batch preview: the edits are applied to the in-memory recipe and
+        // the batch review's Save owns insertion + persistence.
+        if isPreviewOnly {
+            dismiss()
+            return
+        }
+
         // Insert if new
         let isNewRecipe = recipe.modelContext == nil
         if isNewRecipe {
             modelContext.insert(recipe)
         }
         
+        // Sync denormalized meal-plan titles BEFORE the explicit save so they
+        // ride the same transaction instead of relying on a later autosave.
+        MealPlanningService.syncTitle(for: recipe, modelContext: modelContext)
+
         // Persist immediately rather than waiting for the autosave cycle, so an
         // edit isn't lost if the app is killed right after the sheet dismisses.
         do {
@@ -388,7 +476,6 @@ struct RecipeEditorView: View {
         }
 
         SpotlightIndexingService.shared.indexRecipe(recipe)
-        MealPlanningService.syncTitle(for: recipe, modelContext: modelContext)
 
         AnalyticsService.shared.track("recipe_saved", metadata: [
             "mode": isNewRecipe ? (isNewImport ? "import_new" : "manual_new") : "edit_existing",
@@ -412,7 +499,10 @@ struct RecipeEditorView: View {
                 selectedPhotoIndex = index
                 showPhotoViewer = true
             } label: {
-                if let image = UIImage(data: data) {
+                // Downsampled + cached: decoding the full-resolution JPEG for
+                // a 96 pt thumbnail on every Form re-render (i.e. every
+                // keystroke) is the alternative.
+                if let image = RecipeThumbnailCache.shared.thumbnail(for: data, recipeID: recipe.id, maxPixelSize: 200) {
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFill()
@@ -437,16 +527,19 @@ struct RecipeEditorView: View {
                     .font(.title3)
                     .foregroundStyle(.white, Color.black.opacity(0.55))
             }
+            .accessibilityLabel("Delete photo \(index + 1)")
             .offset(x: 6, y: -6)
         }
     }
     
     @MainActor
     private func loadSelectedPhotos(_ items: [PhotosPickerItem]) async {
+        var failures = 0
         for item in items {
             do {
                 guard let rawData = try await item.loadTransferable(type: Data.self),
                       let normalized = ImageDataNormalizer.normalizedJPEGData(from: rawData) else {
+                    failures += 1
                     continue
                 }
 
@@ -455,8 +548,16 @@ struct RecipeEditorView: View {
                     photoData.append(normalized)
                 }
             } catch {
+                failures += 1
                 continue
             }
+        }
+        // A tapped photo silently not appearing reads as "the app is broken";
+        // say what happened instead.
+        if failures > 0 {
+            photoLoadMessage = failures == 1
+                ? "One photo couldn't be loaded and was skipped."
+                : "\(failures) photos couldn't be loaded and were skipped."
         }
     }
 

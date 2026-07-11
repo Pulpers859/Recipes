@@ -56,11 +56,13 @@ struct RecipeDetailView: View {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {
                     recipe.isFavorite.toggle()
+                    HapticFeedback.buttonTap()
                     saveRecipeChange(failureMessage: "Could not update favorite status")
                 } label: {
                     Image(systemName: recipe.isFavorite ? "heart.fill" : "heart")
                         .foregroundStyle(recipe.isFavorite ? .red : Color.rvSubtleText)
                 }
+                .accessibilityLabel(recipe.isFavorite ? "Remove from favorites" : "Add to favorites")
 
                 Button {
                     showCookingMode = true
@@ -68,6 +70,7 @@ struct RecipeDetailView: View {
                     Image(systemName: "flame.fill")
                         .foregroundStyle(Color.rvAccent)
                 }
+                .accessibilityLabel("Start cooking mode")
 
                 Menu {
                     Button("Edit Recipe", systemImage: "pencil") {
@@ -91,6 +94,7 @@ struct RecipeDetailView: View {
                     Image(systemName: "ellipsis.circle")
                         .foregroundStyle(Color.rvSubtleText)
                 }
+                .accessibilityLabel("More actions")
             }
         }
         .fullScreenCover(isPresented: $showCookingMode) {
@@ -145,11 +149,12 @@ struct RecipeDetailView: View {
             AnalyticsService.shared.track("recipe_delete_plan_cleanup_failed")
             return
         }
+        let recipeID = recipe.id
         modelContext.delete(recipe)
 
         do {
             try modelContext.save()
-            SpotlightIndexingService.shared.removeRecipe(recipe)
+            SpotlightIndexingService.shared.removeRecipe(id: recipeID)
             dismiss()
         } catch {
             modelContext.rollback()

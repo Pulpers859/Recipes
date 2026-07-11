@@ -185,6 +185,7 @@ struct ShoppingListView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(newItemName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .accessibilityLabel("Add item to shopping list")
             }
         }
         .padding(18)
@@ -282,6 +283,7 @@ struct ShoppingListView: View {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     item.isChecked.toggle()
                 }
+                HapticFeedback.buttonTap()
                 _ = saveChanges(failureMessage: "Could not update this shopping item")
             } label: {
                 Image(systemName: item.isChecked ? "checkmark.circle.fill" : "circle")
@@ -499,7 +501,12 @@ struct ShoppingListView: View {
             ShoppingListService.normalizedIngredientKey($0.name) == normalizedKey
         }) {
             let incomingAmount = shoppingItem.amount > 0 ? shoppingItem.amount : 1
-            pantryMatch.absorbStock(amount: incomingAmount, unit: shoppingItem.unit)
+            guard pantryMatch.absorbStock(amount: incomingAmount, unit: shoppingItem.unit) else {
+                // Units conflict — deleting the item now would silently throw
+                // its quantity away. Keep it and say why.
+                actionErrorMessage = "\(shoppingItem.name) wasn't moved: your pantry tracks it in \(pantryMatch.unit.isEmpty ? "plain counts" : pantryMatch.unit), but this item is in \(shoppingItem.unit.isEmpty ? "plain counts" : shoppingItem.unit). Edit the pantry quantity first."
+                return
+            }
             pantryMatch.category = shoppingItem.category
             pantryMatch.dateUpdated = Date()
         } else {

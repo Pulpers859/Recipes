@@ -19,6 +19,10 @@ struct ImportView: View {
     @State private var importedCount = 0
     @State private var pendingBatchRecipes: [Recipe] = []
     @State private var showBatchReview = false
+    /// The in-flight parse. Held so Cancel/dismiss can abort it — an orphaned
+    /// task used to finish minutes later and silently insert an unreviewed
+    /// recipe into the library with no review sheet.
+    @State private var activeImportTask: Task<Void, Never>?
     @AppStorage("parse_mode") private var parseModeSetting = "auto"
     
     private let maxPDFImportBytes = 25 * 1024 * 1024
@@ -76,8 +80,20 @@ struct ImportView: View {
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button("Cancel") {
+                        activeImportTask?.cancel()
+                        dismiss()
+                    }
                 }
+            }
+            .onAppear {
+                // The parser/scraper are long-lived objects; don't greet a new
+                // import session with the previous session's failure banner.
+                parser.lastError = nil
+                scraper.lastError = nil
+            }
+            .onDisappear {
+                activeImportTask?.cancel()
             }
             .sheet(isPresented: $showFilePicker) {
                 PDFImportDocumentPicker { pickedURL in
@@ -103,12 +119,18 @@ struct ImportView: View {
                     do {
                         try modelContext.save()
                     } catch {
-                        parser.lastError = "Could not save imported recipes: \(error.localizedDescription)"
-                        return
+                        // Undo the inserts — otherwise they linger unsaved in
+                        // the autosaving context and can be committed later by
+                        // an unrelated save despite the error we just showed.
+                        modelContext.rollback()
+                        return "Could not save the recipes: \(error.localizedDescription)"
                     }
                     importedCount = accepted.count
                     showImportSummary = true
+                    return nil
                 }
+                // A stray swipe must not discard a whole parsed cookbook.
+                .interactiveDismissDisabled()
             }
             .alert("Import Complete", isPresented: $showImportSummary) {
                 Button("OK") { dismiss() }
@@ -188,6 +210,11 @@ struct ImportView: View {
         .rvCard()
     }
 
+    /// Any parse in flight, from any tab.
+    private var isImporting: Bool {
+        parser.isProcessing || scraper.isLoading
+    }
+
     private var parseModeLabel: String {
         switch parseModeSetting {
         case "ai": return "AI"
@@ -215,6 +242,10 @@ struct ImportView: View {
                 )
             }
             .buttonStyle(.plain)
+            // Starting a second parse while one runs races the shared
+            // parser state and can orphan the first recipe unreviewed.
+            .disabled(isImporting)
+            .opacity(isImporting ? 0.5 : 1)
         }
         .rvCard()
     }
@@ -238,6 +269,8 @@ struct ImportView: View {
                     subtitle: "Recipe card, screenshot, or cookbook page"
                 )
             }
+            .disabled(isImporting)
+            .opacity(isImporting ? 0.5 : 1)
             .onChange(of: selectedPhotoItem) { _, newItem in
                 handlePhotoSelection(newItem)
             }
@@ -272,7 +305,8 @@ struct ImportView: View {
                         .background(LinearGradient.rvAccentGradient, in: Circle())
                 }
                 .buttonStyle(.plain)
-                .disabled(urlText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || scraper.isLoading)
+                .disabled(urlText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isImporting)
+                .accessibilityLabel("Import recipe from link")
             }
 
             if scraper.isLoading {
@@ -321,20 +355,26 @@ struct ImportView: View {
     }
 
     private func importURL() {
-        Task {
+        activeImportTask = Task {
             scraper.lastError = nil
             do {
                 let recipe = try await scraper.scrapeRecipe(
                     from: urlText,
                     allowAI: parseModeSetting != "manual"
                 )
+                // The user cancelled or left while we were fetching — don't
+                // insert an unreviewed recipe into the library.
+                guard !Task.isCancelled else { return }
                 modelContext.insert(recipe)
                 AnalyticsService.shared.track("import_url_success", metadata: [
                     "mode": parseModeSetting
                 ])
                 importedRecipe = recipe
                 urlText = ""
+            } catch is CancellationError {
+                // Cancelled by the user; nothing to report.
             } catch {
+                guard !Task.isCancelled else { return }
                 scraper.lastError = error.localizedDescription
                 AnalyticsService.shared.track("import_url_failed")
             }
@@ -344,21 +384,22 @@ struct ImportView: View {
     // MARK: - Handlers
     
     private func handlePickedPDF(url: URL) {
-        guard url.startAccessingSecurityScopedResource() else {
-            parser.lastError = "Permission denied: unable to access the selected file."
-            return
+        // The picker uses asCopy: true, so the URL may be a sandbox-local copy
+        // that carries no security scope — startAccessing returning false is
+        // then expected, not an error. Try the read either way and only pair
+        // a stopAccessing with a successful start.
+        let hasScope = url.startAccessingSecurityScopedResource()
+        defer {
+            if hasScope { url.stopAccessingSecurityScopedResource() }
         }
 
-        // Read data synchronously while we still have security scope access
         let data: Data
         do {
             data = try Data(contentsOf: url)
         } catch {
-            url.stopAccessingSecurityScopedResource()
             parser.lastError = "Could not read file: \(error.localizedDescription)"
             return
         }
-        url.stopAccessingSecurityScopedResource()
 
         guard data.count <= maxPDFImportBytes else {
             parser.lastError = "PDF is too large. Please choose a file under 25 MB."
@@ -366,10 +407,11 @@ struct ImportView: View {
         }
 
         // Parse — may return 1 or many recipes
-        Task {
+        activeImportTask = Task {
             do {
                 let mode = parseMode()
                 let recipes = try await parser.parseRecipes(from: data, mode: mode)
+                guard !Task.isCancelled else { return }
                 await MainActor.run {
                     AnalyticsService.shared.track("import_pdf_success", metadata: [
                         "count": "\(recipes.count)",
@@ -384,7 +426,10 @@ struct ImportView: View {
                         showBatchReview = true
                     }
                 }
+            } catch is CancellationError {
+                // Cancelled by the user; nothing to report.
             } catch {
+                guard !Task.isCancelled else { return }
                 await MainActor.run {
                     parser.lastError = error.localizedDescription
                     AnalyticsService.shared.track("import_pdf_failed")
@@ -396,7 +441,7 @@ struct ImportView: View {
     private func handlePhotoSelection(_ item: PhotosPickerItem?) {
         guard let item else { return }
 
-        Task {
+        activeImportTask = Task {
             await importPhoto(item)
             // Reset so picking the same photo again still triggers an import.
             await MainActor.run { selectedPhotoItem = nil }
@@ -405,7 +450,12 @@ struct ImportView: View {
 
     private func importPhoto(_ item: PhotosPickerItem) async {
         do {
-            guard let data = try await item.loadTransferable(type: Data.self) else { return }
+            guard let data = try await item.loadTransferable(type: Data.self) else {
+                await MainActor.run {
+                    parser.lastError = "That photo couldn't be loaded. Try a different photo, or a screenshot of it."
+                }
+                return
+            }
             guard data.count <= maxPhotoImportBytes else {
                 await MainActor.run {
                     parser.lastError = "Image is too large. Please choose a file under 15 MB."
@@ -413,6 +463,7 @@ struct ImportView: View {
                 return
             }
             let recipe = try await parser.parseRecipeFromImage(data, mode: parseMode())
+            guard !Task.isCancelled else { return }
             await MainActor.run {
                 modelContext.insert(recipe)
                 AnalyticsService.shared.track("import_photo_success", metadata: [
@@ -420,7 +471,10 @@ struct ImportView: View {
                 ])
                 importedRecipe = recipe
             }
+        } catch is CancellationError {
+            // Cancelled by the user; nothing to report.
         } catch {
+            guard !Task.isCancelled else { return }
             await MainActor.run {
                 parser.lastError = error.localizedDescription
                 AnalyticsService.shared.track("import_photo_failed")
@@ -487,10 +541,14 @@ struct BatchImportReviewView: View {
     @Environment(\.dismiss) private var dismiss
     @Binding var recipes: [Recipe]
     let parserWarning: String?
-    let onAccept: ([Recipe]) -> Void
+    /// Returns nil on success, or an error message to show — the sheet stays
+    /// open on failure so "Save" failing never looks like it succeeded.
+    let onAccept: ([Recipe]) -> String?
 
     @State private var selectedRecipe: Recipe?
     @State private var excluded: Set<UUID> = []
+    @State private var saveError: String?
+    @State private var showCancelConfirm = false
 
     private var accepted: [Recipe] {
         recipes.filter { !excluded.contains($0.id) }
@@ -514,6 +572,10 @@ struct BatchImportReviewView: View {
                         RVStatusBanner(message: warning, tone: .warning)
                     }
 
+                    if let saveError {
+                        RVStatusBanner(message: saveError, tone: .danger)
+                    }
+
                     ForEach(recipes) { recipe in
                         batchRecipeRow(recipe)
                     }
@@ -526,19 +588,37 @@ struct BatchImportReviewView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button("Cancel") {
+                        if recipes.isEmpty {
+                            dismiss()
+                        } else {
+                            showCancelConfirm = true
+                        }
+                    }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save \(accepted.count) Recipe\(accepted.count == 1 ? "" : "s")") {
-                        onAccept(accepted)
-                        dismiss()
+                        if let error = onAccept(accepted) {
+                            saveError = error
+                        } else {
+                            dismiss()
+                        }
                     }
                     .disabled(accepted.isEmpty)
                 }
             }
+            .alert("Discard \(recipes.count) Parsed Recipe\(recipes.count == 1 ? "" : "s")?", isPresented: $showCancelConfirm) {
+                Button("Discard", role: .destructive) { dismiss() }
+                Button("Keep Reviewing", role: .cancel) {}
+            } message: {
+                Text("Nothing has been saved yet. Cancelling throws away this parse — you would need to import the document again.")
+            }
             .sheet(item: $selectedRecipe) { recipe in
                 NavigationStack {
-                    RecipeEditorView(recipe: recipe, isNewImport: true)
+                    // Preview-only: edits write back to the pending recipe in
+                    // memory. Insertion happens only via "Save N Recipes",
+                    // so previewing then excluding can't leak into the library.
+                    RecipeEditorView(recipe: recipe, isNewImport: true, isPreviewOnly: true)
                 }
             }
         }
@@ -570,6 +650,7 @@ struct BatchImportReviewView: View {
                             .foregroundStyle(Color.rvAccent)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Preview \(recipe.title)")
 
                     Button {
                         if isExcluded {
@@ -583,6 +664,7 @@ struct BatchImportReviewView: View {
                             .font(.title3)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel(isExcluded ? "Include \(recipe.title)" : "Exclude \(recipe.title)")
                 }
             }
 

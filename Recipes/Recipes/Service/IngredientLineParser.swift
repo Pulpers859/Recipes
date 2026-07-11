@@ -23,15 +23,39 @@ enum IngredientLineParser {
             .trimmingCharacters(in: .whitespaces)
     }
 
+    /// Normalize dash variants (en/em/figure dashes, minus sign) to an ASCII
+    /// hyphen and comma-notation numbers ("1,5" decimal / "1,500" thousands)
+    /// to dot/plain form, so the amount pattern only reasons about one notation.
+    private static func normalizeNotation(_ text: String) -> String {
+        var result = text
+        for dash in ["–", "—", "‒", "−"] {
+            result = result.replacingOccurrences(of: dash, with: "-")
+        }
+        // "1,500" (thousands) first, then "1,5" (comma decimal).
+        result = result.replacingOccurrences(
+            of: #"(\d),(\d{3})(?!\d)"#, with: "$1$2", options: .regularExpression)
+        result = result.replacingOccurrences(
+            of: #"(\d),(\d{1,2})(?!\d)"#, with: "$1.$2", options: .regularExpression)
+        return result
+    }
+
+    /// A single quantity token: mixed number ("1 1/2"), integer + unicode
+    /// fraction ("1½"), plain number ("2", "1.5", "3/4"), or a bare unicode
+    /// fraction ("½"). Deliberately NOT a greedy digit soup — "1 400g can"
+    /// must capture "1", never "1 400".
+    private static let numberToken =
+        #"(?:\d+\s+\d+/\d+|\d+\s*[¼½¾⅓⅔⅛⅜⅝⅞]|\d+(?:[./]\d+)?|[¼½¾⅓⅔⅛⅜⅝⅞])"#
+
     /// Parse an ingredient string like "2 cups all-purpose flour" into components.
     static func parse(_ rawLine: String) -> Ingredient {
-        let cleaned = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleaned = normalizeNotation(rawLine.trimmingCharacters(in: .whitespacesAndNewlines))
 
-        // Pattern: optional amount (digits, fractions, slashes, dots — not hyphens,
-        // which indicate ranges handled separately), optional unit, then name.
+        // Pattern: optional amount (a single quantity token, or a "2-3" range
+        // of two tokens), optional unit, then name. Size qualifiers like
+        // "1 400g can" keep the 400g in the name rather than summing amounts.
         // The \b after the unit prevents short units from eating the start of
         // ingredient names ("2 garlic" must not parse as unit "g" + "arlic").
-        let pattern = #"^([\d\s¼½¾⅓⅔⅛⅜⅝⅞/.]+(?:\s*-\s*[\d¼½¾⅓⅔⅛⅜⅝⅞/.]+)?)?\s*(?:(cups?|tbsp|tsp|tablespoons?|teaspoons?|oz|ounces?|lbs?|pounds?|g|grams?|kg|ml|liters?|l|pinch|cloves?|cans?|packages?|bunche?s?|sticks?|pieces?|slices?|heads?)\b)?\s*[.,]?\s*(.+)"#
+        let pattern = "^(\(numberToken)(?:\\s*-\\s*\(numberToken))?)?\\s*(?:(cups?|tbsp|tsp|tablespoons?|teaspoons?|oz|ounces?|lbs?|pounds?|g|grams?|kg|ml|milliliters?|liters?|l|pints?|quarts?|gallons?|pinch(?:es)?|dashe?s?|sprigs?|stalks?|cloves?|cans?|packages?|bunche?s?|sticks?|pieces?|slices?|heads?)\\b)?\\s*[.,]?\\s*(.+)"
 
         if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) {
             let range = NSRange(cleaned.startIndex..., in: cleaned)

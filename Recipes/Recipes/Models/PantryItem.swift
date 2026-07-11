@@ -47,15 +47,19 @@ final class PantryItem {
         let newUnit = ShoppingListService.normalizeUnit(incomingUnit.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
 
         if amount <= 0 {
+            // Nothing in stock to conflict with — adopt the incoming stock
+            // (and its unit, when it has one) wholesale.
             amount = incomingAmount
-            if existingUnit.isEmpty { unit = incomingUnit }
+            if !newUnit.isEmpty { unit = incomingUnit }
             dateUpdated = Date()
             return true
         }
 
-        if existingUnit == newUnit || newUnit.isEmpty || existingUnit.isEmpty {
+        // Sum only when the units genuinely agree (both named the same, or
+        // both bare counts). A one-sided unit used to be treated as "close
+        // enough", which summed "3" loose eggs with "2 lb" into "5 lb".
+        if existingUnit == newUnit {
             amount += incomingAmount
-            if existingUnit.isEmpty { unit = incomingUnit }
             dateUpdated = Date()
             return true
         }

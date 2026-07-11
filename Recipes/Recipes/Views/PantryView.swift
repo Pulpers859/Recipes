@@ -130,6 +130,20 @@ struct PantryView: View {
             } message: {
                 Text("This will remove all \(pantryItems.count) pantry item(s). A recovery snapshot is saved first — tap Restore afterward to bring them back.")
             }
+            .alert("Delete \(itemPendingDelete?.name ?? "item")?", isPresented: Binding(
+                get: { itemPendingDelete != nil },
+                set: { if !$0 { itemPendingDelete = nil } }
+            )) {
+                Button("Delete", role: .destructive) {
+                    if let item = itemPendingDelete {
+                        deletePantryItem(item)
+                    }
+                    itemPendingDelete = nil
+                }
+                Button("Cancel", role: .cancel) { itemPendingDelete = nil }
+            } message: {
+                Text("This single pantry item is removed permanently — the Restore button only recovers a full Clear All.")
+            }
             .alert("Restore pantry from backup?", isPresented: $showRestoreConfirm) {
                 Button("Restore") { restorePantryFromBackup() }
                 Button("Cancel", role: .cancel) { }
@@ -323,6 +337,7 @@ struct PantryView: View {
     @State private var editingItem: PantryItem?
     @State private var editAmount = ""
     @State private var editUnit = ""
+    @State private var itemPendingDelete: PantryItem?
 
     private func pantryRow(_ item: PantryItem) -> some View {
         HStack(spacing: 12) {
@@ -348,6 +363,7 @@ struct PantryView: View {
                     .foregroundStyle(Color.rvAccent)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Edit quantity of \(item.name)")
 
             Button {
                 item.isStaple.toggle()
@@ -359,6 +375,7 @@ struct PantryView: View {
                     .foregroundStyle(item.isStaple ? Color.rvPrimary : Color.rvMuted)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(item.isStaple ? "Unmark \(item.name) as staple" : "Mark \(item.name) as staple")
 
             Button {
                 item.amount = 0
@@ -373,15 +390,17 @@ struct PantryView: View {
                     .foregroundStyle(.orange)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Mark \(item.name) as out of stock")
 
             Button(role: .destructive) {
-                deletePantryItem(item)
+                itemPendingDelete = item
             } label: {
                 Image(systemName: "trash")
                     .font(.subheadline)
                     .foregroundStyle(.red.opacity(0.7))
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Delete \(item.name)")
         }
         .padding(16)
         .background(Color.rvPaper)
@@ -392,7 +411,7 @@ struct PantryView: View {
         }
         .contextMenu {
             Button(role: .destructive) {
-                deletePantryItem(item)
+                itemPendingDelete = item
             } label: {
                 Label("Delete Item", systemImage: "trash")
             }
@@ -537,19 +556,22 @@ struct PantryView: View {
 
         // Capture a recovery snapshot to a dedicated file BEFORE deleting.
         // The rolling automatic backup is about to be overwritten with the
-        // emptied pantry, so it can't be the recovery story here.
-        var snapshotSaved = true
+        // emptied pantry, so it can't be the recovery story here. The
+        // confirmation dialog promised a snapshot — if it can't be written,
+        // delete NOTHING, exactly like Delete All Recipes.
         do {
             try PantryBackupService.writePreClearBackup(pantryItems: pantryItems)
         } catch {
-            snapshotSaved = false
+            pantryStatusMessage = "Nothing was cleared because the recovery snapshot could not be saved: \(error.localizedDescription)"
+            AnalyticsService.shared.track("pantry_clear_backup_failed")
+            return
         }
 
         for item in pantryItems {
             modelContext.delete(item)
         }
         if persistPantryChanges(snapshot: []) {
-            canRestoreBackup = snapshotSaved && PantryBackupService.hasRestorableBackup()
+            canRestoreBackup = PantryBackupService.hasRestorableBackup()
             pantryStatusMessage = canRestoreBackup
                 ? "Cleared \(count) pantry item(s). Tap Restore to bring them back."
                 : "Cleared \(count) pantry item(s)."
@@ -601,6 +623,7 @@ struct PantryView: View {
 
         var added = 0
         var updated = 0
+        var unitConflicts: [String] = []
         var pantrySnapshot = pantryItems
 
         for shoppingItem in checkedItems {
@@ -609,10 +632,16 @@ struct PantryView: View {
                 ShoppingListService.normalizedIngredientKey($0.name) == normalizedKey
             }) {
                 let incomingAmount = shoppingItem.amount > 0 ? shoppingItem.amount : 1
-                pantryMatch.absorbStock(amount: incomingAmount, unit: shoppingItem.unit)
-                pantryMatch.category = shoppingItem.category
-                pantryMatch.dateUpdated = Date()
-                updated += 1
+                if pantryMatch.absorbStock(amount: incomingAmount, unit: shoppingItem.unit) {
+                    pantryMatch.category = shoppingItem.category
+                    pantryMatch.dateUpdated = Date()
+                    updated += 1
+                    modelContext.delete(shoppingItem)
+                } else {
+                    // Units conflict — keep the shopping item so its quantity
+                    // isn't silently thrown away.
+                    unitConflicts.append(shoppingItem.name)
+                }
             } else {
                 let item = PantryItem(
                     name: shoppingItem.name,
@@ -623,15 +652,20 @@ struct PantryView: View {
                 modelContext.insert(item)
                 pantrySnapshot.append(item)
                 added += 1
+                modelContext.delete(shoppingItem)
             }
-            modelContext.delete(shoppingItem)
         }
 
         if persistPantryChanges(snapshot: pantrySnapshot) {
-            pantryStatusMessage = "Stocked pantry from shopping: \(added) added, \(updated) updated."
+            var message = "Stocked pantry from shopping: \(added) added, \(updated) updated."
+            if !unitConflicts.isEmpty {
+                message += " Kept \(unitConflicts.joined(separator: ", ")) on the list because the units differ from your pantry."
+            }
+            pantryStatusMessage = message
             AnalyticsService.shared.track("pantry_stock_from_shopping", metadata: [
                 "added": "\(added)",
-                "updated": "\(updated)"
+                "updated": "\(updated)",
+                "unit_conflicts": "\(unitConflicts.count)"
             ])
         }
     }
