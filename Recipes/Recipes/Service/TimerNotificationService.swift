@@ -36,6 +36,17 @@ final class TimerNotificationService {
         }
     }
 
+    /// Queries the live permission state (the cached UserDefaults flag lags
+    /// the first-ever prompt) and reports on the main queue. Also refreshes
+    /// the cached flag as a side effect.
+    func notificationsDenied(_ completion: @escaping (Bool) -> Void) {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            let denied = settings.authorizationStatus == .denied
+            UserDefaults.standard.set(denied, forKey: Self.deniedKey)
+            DispatchQueue.main.async { completion(denied) }
+        }
+    }
+
     func scheduleTimerNotification(stepID: UUID, label: String, recipeTitle: String, fireDate: Date) {
         let content = UNMutableNotificationContent()
         content.title = "\(label) finished"

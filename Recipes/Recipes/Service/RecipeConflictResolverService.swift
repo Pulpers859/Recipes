@@ -12,10 +12,12 @@ struct ConflictResolutionResult {
 
 enum RecipeConflictResolverService {
     static func resolveRecipeConflicts(recipes: [Recipe], modelContext: ModelContext) -> ConflictResolutionResult {
-        var mergedRecipes = 0
         var deletedDuplicates = 0
         var deletedIDs: [UUID] = []
         var deletedIDSet = Set<UUID>()
+        // Unique canonicals, so a recipe absorbing duplicates in both passes
+        // counts as one resolved group in the user-facing message.
+        var mergedCanonicalIDs = Set<UUID>()
 
         func process(_ groups: [[Recipe]]) {
             for group in groups {
@@ -53,7 +55,7 @@ enum RecipeConflictResolverService {
                     deletedDuplicates += 1
                 }
 
-                mergedRecipes += 1
+                mergedCanonicalIDs.insert(canonical.id)
             }
         }
 
@@ -78,7 +80,7 @@ enum RecipeConflictResolverService {
         process(Array(byTitleAndURL.values))
 
         return ConflictResolutionResult(
-            mergedRecipes: mergedRecipes,
+            mergedRecipes: mergedCanonicalIDs.count,
             deletedDuplicates: deletedDuplicates,
             deletedRecipeIDs: deletedIDs
         )

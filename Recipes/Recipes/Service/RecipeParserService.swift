@@ -468,7 +468,11 @@ class RecipeParserService: ObservableObject {
 
         var results: [Int: String] = [:]
         for i in toScan {
-            let pageText: String = try await {
+            // Per-page resilience: a single page failing Vision (e.g. a blank
+            // divider in an otherwise-digital PDF) must not fail the whole
+            // import. Whole-document OCR failure still surfaces via the
+            // caller's empty-text check.
+            let pageText: String = await {
                 guard let page = document.page(at: i) else { return "" }
                 let bounds = page.bounds(for: .mediaBox)
                 // Cap rendering at 150 DPI — sufficient for OCR and avoids
@@ -490,7 +494,7 @@ class RecipeParserService: ObservableObject {
                     return image.cgImage
                 }
                 guard let cg = cgImage else { return "" }
-                return try await recognizeText(in: cg)
+                return (try? await recognizeText(in: cg)) ?? ""
             }()
             results[i] = pageText
         }

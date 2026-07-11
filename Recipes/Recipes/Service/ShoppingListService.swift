@@ -38,9 +38,11 @@ class ShoppingListService {
 
                 // Combine amounts only when the units are actually
                 // compatible. When they aren't ("2 cup flour" vs "500 g
-                // flour"), keep a separate unit-scoped line item — the old
-                // behavior silently DROPPED the incoming amount, so the list
-                // under-stated what to buy.
+                // flour"), keep a separate line item scoped by unit FAMILY
+                // (weight/volume/that unit) — the old behavior silently
+                // DROPPED the incoming amount, so the list under-stated what
+                // to buy. Family scoping lets "500 g" and "1 kg" variants
+                // still merge with each other.
                 var key = baseKey
                 if let existing = aggregated[baseKey],
                    convertToCommonUnit(
@@ -48,7 +50,7 @@ class ShoppingListService {
                        unit: ingredient.unit,
                        targetUnit: existing.unit
                    ) == nil {
-                    key = "\(baseKey)|\(normalizedUnit)"
+                    key = "\(baseKey)|\(unitFamily(of: normalizedUnit))"
                 }
 
                 if var existing = aggregated[key] {
@@ -139,7 +141,10 @@ class ShoppingListService {
                 originalAmount: startingAmount,
                 pantryReductionAmount: max(0, startingAmount - data.amount)
             )
-            if checkedKeys.contains(data.pantryKey) {
+            // Restore checked state only onto the base entry: the remembered
+            // key can't distinguish unit variants, and a NEW variant line
+            // appearing pre-checked would get skipped at the store.
+            if key == data.pantryKey, checkedKeys.contains(key) {
                 item.isChecked = true
             }
             modelContext.insert(item)
@@ -317,6 +322,15 @@ class ShoppingListService {
         }
     }
     
+    /// Coarse unit family used to scope non-mergeable shopping lines:
+    /// all weights share one bucket, all volumes another, anything else
+    /// buckets by its own normalized unit.
+    private static func unitFamily(of normalizedUnit: String) -> String {
+        if ["g", "kg", "oz", "lb"].contains(normalizedUnit) { return "weight" }
+        if ["tsp", "tbsp", "cup", "ml", "l", "fl oz"].contains(normalizedUnit) { return "volume" }
+        return normalizedUnit
+    }
+
     /// Try to convert an amount to match the target unit.
     /// If units are compatible (both weight or both volume), converts.
     /// Returns nil when units are incompatible so callers never sum or

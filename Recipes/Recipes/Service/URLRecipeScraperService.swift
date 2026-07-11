@@ -8,6 +8,9 @@ class URLRecipeScraperService: ObservableObject {
     @Published var isLoading = false
     @Published var statusMessage = ""
     @Published var lastError: String?
+    /// Advisory notices (e.g. "page text was trimmed") — shown as a warning,
+    /// not an error, because the import itself succeeded.
+    @Published var lastWarning: String?
     
     private var apiKey: String {
         APIKeyStore.loadClaudeKey() ?? ""
@@ -93,7 +96,7 @@ class URLRecipeScraperService: ObservableObject {
             let cleanedText = stripHTML(html)
             if cleanedText.count > aiCharacterBudget {
                 let percentTrimmed = Int(Double(cleanedText.count - aiCharacterBudget) / Double(cleanedText.count) * 100)
-                lastError = "This page is long — about \(percentTrimmed)% of its text was trimmed before AI extraction, so parts of the recipe may be missing. Review the result carefully."
+                lastWarning = "This page is long — about \(percentTrimmed)% of its text was trimmed before AI extraction, so parts of the recipe may be missing. Review the result carefully."
             }
             return try await aiExtract(text: cleanedText, sourceURL: url.absoluteString)
         }

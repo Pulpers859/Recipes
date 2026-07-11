@@ -66,6 +66,21 @@ Four parallel audit lanes (data safety, import/parsing, SwiftUI flows/UX, securi
 70. `PrivacyInfo.xcprivacy` added (required-reason declarations for UserDefaults and file-timestamp APIs; no tracking, no collected data) — an App Store submission blocker.
 71. AI step ordering: ties broken by original position (Swift's sort is not stable); step `order` decode-optional.
 
+### Stress-Test + Self-Review Loop (same day, second pass)
+
+After the fixes above, a real-ingredient-corpus stress run and an independent review of the fix diff itself found and fixed:
+
+72. **"chicken broth" categorized into the meat aisle** — broth/stock/bouillon now always categorize as pantry (found by executing the categorizer against a 40-line real corpus).
+73. **Regression in the new amount pattern: leading-dot decimals** — ".5 cup sugar" degraded to name "5 cup sugar". `\.\d+` added to the quantity token; regression test added (23 tests total, all executed and passing).
+74. **Unit-scoped shopping lines now scope by unit family** — "500 g flour" and "1 kg flour" merge with each other instead of producing two lines; checked-state restore is limited to the base line so a new unit-variant can never appear pre-checked and get skipped at the store.
+75. **Batch-save failure recovery no longer uses `rollback()`** — it deleted-then-retried the same inserted models through an API with undefined semantics and would also have discarded unrelated unsaved changes; the specific inserts are now removed individually so Save can be retried safely.
+76. **Notification-denied banner timing** — the fixed 1 s delay missed the first-ever permission prompt; cooking mode now queries live notification settings per timer start (and hides the banner if permission was granted since).
+77. **Page-trim advisory no longer renders as a red error** — the URL scraper gained a separate warning channel shown with warning tone after a successful import.
+78. **A single unreadable page no longer fails an entire PDF import** — per-page OCR errors degrade to an empty page; whole-document failure still surfaces.
+79. **"Resolved N conflict group(s)" no longer double-counts** a canonical that absorbed duplicates in both resolver passes; stale `absorbStock` doc comment corrected before someone "fixes" the code back to the old data-corrupting behavior.
+
+Redundancy noted: `SampleRecipeService` is dead code (never referenced). Left in place in case it's intended for future onboarding; delete it if not.
+
 ### Verified Clean (no action needed)
 
 - No secrets in source or any git history (pickaxe across sk-ant/ghp_/AKIA/BEGIN-key patterns).

@@ -40,11 +40,11 @@ enum IngredientLineParser {
     }
 
     /// A single quantity token: mixed number ("1 1/2"), integer + unicode
-    /// fraction ("1½"), plain number ("2", "1.5", "3/4"), or a bare unicode
-    /// fraction ("½"). Deliberately NOT a greedy digit soup — "1 400g can"
-    /// must capture "1", never "1 400".
+    /// fraction ("1½"), plain number ("2", "1.5", "3/4"), leading-dot
+    /// decimal (".5"), or a bare unicode fraction ("½"). Deliberately NOT a
+    /// greedy digit soup — "1 400g can" must capture "1", never "1 400".
     private static let numberToken =
-        #"(?:\d+\s+\d+/\d+|\d+\s*[¼½¾⅓⅔⅛⅜⅝⅞]|\d+(?:[./]\d+)?|[¼½¾⅓⅔⅛⅜⅝⅞])"#
+        #"(?:\d+\s+\d+/\d+|\d+\s*[¼½¾⅓⅔⅛⅜⅝⅞]|\d+(?:[./]\d+)?|\.\d+|[¼½¾⅓⅔⅛⅜⅝⅞])"#
 
     /// Parse an ingredient string like "2 cups all-purpose flour" into components.
     static func parse(_ rawLine: String) -> Ingredient {

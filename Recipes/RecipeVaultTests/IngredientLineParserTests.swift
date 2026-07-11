@@ -111,6 +111,14 @@ final class IngredientLineParserTests: XCTestCase {
         XCTAssertEqual(pint.name, "heavy cream")
     }
 
+    func testLeadingDotDecimal() {
+        // ".5 cup sugar" must not degrade into name "5 cup sugar".
+        let ing = IngredientLineParser.parse(".5 cup sugar")
+        XCTAssertEqual(ing.amount, 0.5, accuracy: 0.001)
+        XCTAssertEqual(ing.unit.lowercased(), "cup")
+        XCTAssertEqual(ing.name, "sugar")
+    }
+
     func testUnicodeMixedNumberNoSpace() {
         let ing = IngredientLineParser.parse("1½ cups milk")
         XCTAssertEqual(ing.amount, 1.5, accuracy: 0.001)

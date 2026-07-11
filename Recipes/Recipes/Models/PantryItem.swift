@@ -36,9 +36,11 @@ final class PantryItem {
             .joined(separator: " ")
     }
 
-    /// Adds incoming stock only when the units agree (or one side has no
-    /// unit), so "2 cups" never silently absorbs "2 lb" into a meaningless
-    /// total. Returns false when the units conflicted and nothing was added.
+    /// Adds incoming stock only when the units genuinely agree — both named
+    /// the same after normalization, or both bare counts. A one-sided unit is
+    /// a conflict ("3" loose eggs must not absorb "2 lb"), except when
+    /// nothing is in stock yet, in which case the incoming stock is adopted
+    /// wholesale. Returns false when the units conflicted and nothing was added.
     @discardableResult
     func absorbStock(amount incomingAmount: Double, unit incomingUnit: String) -> Bool {
         guard incomingAmount > 0 else { return true }

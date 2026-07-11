@@ -91,6 +91,7 @@ struct ImportView: View {
                 // import session with the previous session's failure banner.
                 parser.lastError = nil
                 scraper.lastError = nil
+                scraper.lastWarning = nil
             }
             .onDisappear {
                 activeImportTask?.cancel()
@@ -122,7 +123,12 @@ struct ImportView: View {
                         // Undo the inserts — otherwise they linger unsaved in
                         // the autosaving context and can be committed later by
                         // an unrelated save despite the error we just showed.
-                        modelContext.rollback()
+                        // Delete the specific inserts rather than rollback():
+                        // the review sheet stays open for a retry, and Save
+                        // must be able to re-insert these same instances.
+                        for recipe in accepted {
+                            modelContext.delete(recipe)
+                        }
                         return "Could not save the recipes: \(error.localizedDescription)"
                     }
                     importedCount = accepted.count
@@ -322,6 +328,10 @@ struct ImportView: View {
                 RVStatusBanner(message: error, tone: .danger)
             }
 
+            if let warning = scraper.lastWarning {
+                RVStatusBanner(message: warning, tone: .warning)
+            }
+
             RVStatusBanner(
                 message: "Local and private-network URLs are blocked for safety. You will review the recipe before keeping it.",
                 tone: .info
@@ -357,6 +367,7 @@ struct ImportView: View {
     private func importURL() {
         activeImportTask = Task {
             scraper.lastError = nil
+            scraper.lastWarning = nil
             do {
                 let recipe = try await scraper.scrapeRecipe(
                     from: urlText,

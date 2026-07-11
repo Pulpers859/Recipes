@@ -293,13 +293,11 @@ struct CookingModeView: View {
                     // A local notification is the only completion signal that
                     // reaches the cook when the phone is locked or face-down.
                     TimerNotificationService.shared.requestAuthorizationIfNeeded()
-                    // Slight delay so a just-answered permission prompt is
-                    // reflected before we decide whether to warn.
-                    Task {
-                        try? await Task.sleep(for: .seconds(1))
-                        if TimerNotificationService.shared.isNotificationDenied {
-                            withAnimation { showNotificationDeniedNotice = true }
-                        }
+                    // Query the live permission state (not the cached flag,
+                    // which lags the first-ever prompt) and also hide the
+                    // notice again if permission was granted since.
+                    TimerNotificationService.shared.notificationsDenied { denied in
+                        withAnimation { showNotificationDeniedNotice = denied }
                     }
                     TimerNotificationService.shared.scheduleTimerNotification(
                         stepID: step.id,
