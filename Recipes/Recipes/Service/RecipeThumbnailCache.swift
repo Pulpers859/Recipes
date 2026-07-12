@@ -18,7 +18,7 @@ final class RecipeThumbnailCache {
     /// different image of identical size doesn't return the stale thumbnail.
     /// The sample hash is O(1)-ish — far cheaper than decoding the full JPEG.
     func thumbnail(for data: Data, recipeID: UUID, maxPixelSize: CGFloat = 700) -> UIImage? {
-        let key = cacheKey(for: data, recipeID: recipeID)
+        let key = cacheKey(for: data, recipeID: recipeID, maxPixelSize: maxPixelSize)
         if let cached = cache.object(forKey: key) {
             return cached
         }
@@ -39,7 +39,7 @@ final class RecipeThumbnailCache {
         return image
     }
 
-    private func cacheKey(for data: Data, recipeID: UUID) -> NSString {
+    private func cacheKey(for data: Data, recipeID: UUID, maxPixelSize: CGFloat) -> NSString {
         var hasher = Hasher()
         hasher.combine(data.count)
         // Hashing a small head+tail sample distinguishes same-size-but-different
@@ -50,6 +50,8 @@ final class RecipeThumbnailCache {
         if data.count > sampleSize {
             hasher.combine(data.suffix(sampleSize))
         }
-        return "\(recipeID.uuidString)-\(hasher.finalize())" as NSString
+        // Size is part of the key: the editor's 200 px request must never be
+        // handed back to the recipe list, which renders at 700 px.
+        return "\(recipeID.uuidString)-\(Int(maxPixelSize))-\(hasher.finalize())" as NSString
     }
 }

@@ -26,9 +26,11 @@ enum AppDataStack {
         // Attempt 1: normal on-disk open.
         do {
             let container = try ModelContainer(for: schema, configurations: config)
-            // Clear any stale failure flag from a previous launch so the UI
-            // doesn't warn about a problem that has since resolved.
-            UserDefaults.standard.removeObject(forKey: databaseErrorKey)
+            // Deliberately do NOT clear the failure flag here: after a store
+            // reset, the next launch opens the fresh store cleanly, and wiping
+            // the flag on success would destroy the "your library was reset; a
+            // copy was archived" notice before the user ever acknowledged it.
+            // ContentView clears the flag when the alert is dismissed.
             return container
         } catch {
             #if DEBUG

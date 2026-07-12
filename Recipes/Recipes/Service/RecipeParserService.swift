@@ -63,7 +63,12 @@ class RecipeParserService: ObservableObject {
                 : "Scanning \(thinPageIndices.count) page(s) without selectable text..."
             let ocrTexts = try await ocrPages(thinPageIndices, from: pdfData)
             for (index, text) in ocrTexts {
-                pageTexts[index] = text
+                // Keep the original selectable text (however short) when OCR
+                // comes back empty — a failed OCR pass must never destroy
+                // real text like a decorative title page.
+                if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    pageTexts[index] = text
+                }
             }
         }
 
@@ -404,10 +409,16 @@ class RecipeParserService: ObservableObject {
 
         let responseData = try await callClaudeAPI(requestBody)
         let parsedArray = try JSONDecoder().decode([AIParsedRecipe].self, from: responseData)
-        
-        return parsedArray.enumerated().map { index, parsed in
-            parsed.toRecipe(sourceType: .aiParsed, originalPDFData: index == 0 ? pdfData : nil)
-        }
+
+        // Same empty-salvage guard as the single-recipe path: a tolerant
+        // decode that salvaged neither ingredients nor steps is a failed
+        // section, not a recipe — passing it through would put a blank
+        // "Imported Recipe" in batch review and suppress the skip warning.
+        return parsedArray
+            .filter { !($0.ingredients.isEmpty && $0.steps.isEmpty) }
+            .enumerated().map { index, parsed in
+                parsed.toRecipe(sourceType: .aiParsed, originalPDFData: index == 0 ? pdfData : nil)
+            }
     }
     
     // MARK: - Claude API Call Helper

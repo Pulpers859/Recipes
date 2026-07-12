@@ -139,6 +139,7 @@ struct ImportView: View {
                         }
                         return "Could not save the recipes: \(error.localizedDescription)"
                     }
+                    SpotlightIndexingService.shared.indexAllRecipes(accepted)
                     importedCount = accepted.count
                     showImportSummary = true
                     return nil

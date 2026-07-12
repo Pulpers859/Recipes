@@ -172,6 +172,27 @@ final class RecipeExportRoundTripTests: XCTestCase {
         XCTAssertEqual(result.unreadableCount, 1)
     }
 
+    func testFractionalSecondDatesImport() throws {
+        // The Python migration scripts emitted microsecond timestamps; a
+        // strict .iso8601 decoder failed every such record.
+        let json = """
+        {
+          "version": 3,
+          "exportDate": "2026-07-11T18:23:45.123456Z",
+          "recipeCount": 1,
+          "recipes": [
+            {"title": "Migrated", "summary": "", "ingredients": [], "steps": [], "servings": 2,
+             "prepTime": 0, "cookTime": 0, "category": "other", "tags": [], "cuisine": "",
+             "difficulty": "easy", "notes": "", "rating": 0, "isFavorite": false,
+             "dateAdded": "2026-07-11T18:23:45.123456Z"}
+          ]
+        }
+        """
+        let result = try RecipeExportService.importFromJSON(data: Data(json.utf8))
+        XCTAssertEqual(result.recipes.count, 1)
+        XCTAssertEqual(result.unreadableCount, 0)
+    }
+
     func testEmptyBackupThrows() {
         let json = """
         {"version": 4, "exportDate": "2026-07-11T00:00:00Z", "recipeCount": 0, "recipes": []}

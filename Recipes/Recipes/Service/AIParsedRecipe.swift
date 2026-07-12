@@ -80,6 +80,21 @@ struct AIParsedRecipe: Decodable {
         }
 
         init(from decoder: Decoder) throws {
+            // The model sometimes emits ingredients as plain strings
+            // ("2 cups flour") instead of objects. Route those through the
+            // shared line parser — dropping them all used to leave a
+            // steps-only recipe that "succeeded" past the fallback guard.
+            if let single = try? decoder.singleValueContainer(),
+               let line = try? single.decode(String.self) {
+                let parsed = IngredientLineParser.parse(line)
+                name = parsed.name
+                amount = parsed.amount > 0 ? parsed.amount : nil
+                unit = parsed.unit.isEmpty ? nil : parsed.unit
+                section = nil
+                isOptional = nil
+                return
+            }
+
             let c = try decoder.container(keyedBy: CodingKeys.self)
             name = try c.decode(String.self, forKey: .name)
             if let value = try? c.decode(Double.self, forKey: .amount) {
@@ -108,6 +123,16 @@ struct AIParsedRecipe: Decodable {
         }
 
         init(from decoder: Decoder) throws {
+            // Steps as plain strings are the same drift shape as ingredients.
+            if let single = try? decoder.singleValueContainer(),
+               let text = try? single.decode(String.self) {
+                instruction = text
+                order = nil
+                timerSeconds = nil
+                timerLabel = nil
+                return
+            }
+
             let c = try decoder.container(keyedBy: CodingKeys.self)
             instruction = try c.decode(String.self, forKey: .instruction)
             order = (try? c.decode(Int.self, forKey: .order))

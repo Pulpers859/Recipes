@@ -69,7 +69,12 @@ enum MealPlanningService {
     /// Updates the denormalized `recipeTitle` on any meal-plan entries that
     /// reference `recipe`, so a rename in the editor is reflected immediately.
     static func syncTitle(for recipe: Recipe, modelContext: ModelContext) {
-        let plans = (try? modelContext.fetch(FetchDescriptor<MealPlan>())) ?? []
+        guard let plans = try? modelContext.fetch(FetchDescriptor<MealPlan>()) else {
+            // A stale denormalized title is recoverable; a silent failure with
+            // no trail is not.
+            AnalyticsService.shared.track("meal_plan_title_sync_fetch_failed")
+            return
+        }
         for plan in plans {
             guard plan.entries.contains(where: { $0.recipeID == recipe.id && $0.recipeTitle != recipe.title }) else { continue }
             var entries = plan.entries
@@ -83,7 +88,10 @@ enum MealPlanningService {
     /// Re-points entries at a surviving recipe after duplicate resolution so
     /// planned meals follow the merged recipe instead of disappearing.
     static func retargetEntries(fromRecipeID oldID: UUID, to canonical: Recipe, modelContext: ModelContext) {
-        let plans = (try? modelContext.fetch(FetchDescriptor<MealPlan>())) ?? []
+        guard let plans = try? modelContext.fetch(FetchDescriptor<MealPlan>()) else {
+            AnalyticsService.shared.track("meal_plan_retarget_fetch_failed")
+            return
+        }
         for plan in plans {
             guard plan.entries.contains(where: { $0.recipeID == oldID }) else { continue }
             var entries = plan.entries

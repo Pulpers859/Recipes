@@ -126,9 +126,30 @@ class RecipeExportService {
     /// - One malformed recipe record is skipped instead of throwing away the
     ///   entire file (each record decodes independently), and the skip count
     ///   is reported.
+    /// Plain `.iso8601` rejects fractional seconds — and a *present but
+    /// malformed* date fails the whole record, so one strict formatter made
+    /// entire externally-generated backups (e.g. from the Python migration
+    /// scripts, which emitted microseconds) read as "no readable recipes".
+    private static let iso8601Plain = ISO8601DateFormatter()
+    private static let iso8601Fractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
     static func importFromJSON(data: Data) throws -> ImportResult {
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let string = try container.decode(String.self)
+            if let date = iso8601Plain.date(from: string) ?? iso8601Fractional.date(from: string) {
+                return date
+            }
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Unrecognized ISO 8601 date: \(string)"
+            )
+        }
 
         let wrapper = try decoder.decode(ImportWrapper.self, from: data)
 

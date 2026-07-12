@@ -190,16 +190,22 @@ class ShoppingListService {
     private nonisolated static let qualifierPrefixes = [
         "liquid ", "fresh ", "dried ", "large ", "small ", "medium ",
         "chopped ", "diced ", "minced ", "sliced ", "shredded ", "grated ",
+        "finely ", "coarsely ", "roughly ", "thinly ", "freshly ",
+        "boneless ", "skinless ", "bone-in ", "skin-on ",
+        "extra-virgin ", "extra virgin ",
         "fat-free ", "fat free ", "nonfat ", "non-fat ", "low-fat ", "lowfat ",
         "low calorie ", "low-calorie ", "reduced fat ", "reduced-fat ",
         "uncured ", "lean ", "plain ", "raw ", "cooked ", "frozen ",
         "light ", "sugar-free ", "sugar free ", "whole wheat ",
+        // Deliberately NOT here: colors ("green onion" vs "yellow onion" are
+        // different purchases) and varietals.
     ]
 
     private nonisolated static let qualifierSuffixes = [
         ", divided", ", to taste", " to taste", "(optional)", ", diced",
         ", chopped", ", sliced", ", minced",
         " or similar", " of choice",
+        " leaves", " leaf",
     ]
 
     /// Substring → canonical replacements. Self-mapping entries are not
@@ -268,7 +274,23 @@ class ShoppingListService {
             }
         }
 
-        return s.trimmingCharacters(in: .whitespacesAndNewlines)
+        s = s.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Light plural fold on the final word so "chicken breasts" merges
+        // with "chicken breast". Merge keys are never displayed, so a crude
+        // singular ("asparagu" would be wrong — hence the "us" guard) only
+        // has to be CONSISTENT, not correct English.
+        if s.count > 3, s.hasSuffix("s"), !s.hasSuffix("ss"), !s.hasSuffix("us") {
+            if s.hasSuffix("ies") {
+                s = String(s.dropLast(3)) + "y"
+            } else if s.hasSuffix("oes") {
+                s = String(s.dropLast(2))
+            } else {
+                s = String(s.dropLast())
+            }
+        }
+
+        return s
     }
     
     // MARK: - Display Name Cleanup
@@ -342,12 +364,14 @@ class ShoppingListService {
         
         // Same unit — just add
         if from == to { return (amount, to) }
-        
+
         // Both empty / countable — just add
         if from.isEmpty && to.isEmpty { return (amount, to) }
         if from.isEmpty || to.isEmpty {
-            // One has unit, other doesn't — keep the one with a unit
-            return to.isEmpty ? (amount, from) : (amount, to)
+            // One is a bare count, the other measured — refusing keeps
+            // "3" loose eggs from converting into "3 lb". Callers treat nil
+            // as "keep the amounts separate".
+            return nil
         }
         
         // Weight conversions (to grams as common base). Bare "oz" is treated

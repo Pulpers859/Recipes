@@ -73,7 +73,7 @@ enum RecipeLibraryMaintenance {
         let imported = importResult.recipes
         var existingFingerprints = Set(existingRecipes.map(fingerprint))
         let existingIDs = Set(existingRecipes.map(\.id))
-        var insertedCount = 0
+        var inserted: [Recipe] = []
         var skippedCount = 0
 
         for recipe in imported {
@@ -88,8 +88,9 @@ enum RecipeLibraryMaintenance {
             }
             modelContext.insert(recipe)
             existingFingerprints.insert(key)
-            insertedCount += 1
+            inserted.append(recipe)
         }
+        let insertedCount = inserted.count
 
         // v4 backups can carry pantry, shopping, and meal-plan sections.
         // Merging is strictly additive — nothing existing is deleted or
@@ -103,6 +104,11 @@ enum RecipeLibraryMaintenance {
             modelContext.rollback()
             throw MaintenanceError.saveFailed(error.localizedDescription)
         }
+
+        // Index only after the save is durable — same ordering rule as the
+        // delete paths. Without this, restored recipes were invisible to
+        // Spotlight until the next launch's full reindex.
+        SpotlightIndexingService.shared.indexAllRecipes(inserted)
 
         AnalyticsService.shared.track("backup_import_json", metadata: [
             "inserted": "\(insertedCount)",

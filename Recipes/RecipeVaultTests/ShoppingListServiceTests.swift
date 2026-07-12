@@ -55,6 +55,46 @@ final class ShoppingListServiceTests: XCTestCase {
         )
     }
 
+    func testButcherAndProduceQualifiersMerge() {
+        XCTAssertEqual(
+            ShoppingListService.normalizedIngredientKey("boneless skinless chicken breasts"),
+            ShoppingListService.normalizedIngredientKey("chicken breast")
+        )
+        XCTAssertEqual(
+            ShoppingListService.normalizedIngredientKey("extra-virgin olive oil"),
+            ShoppingListService.normalizedIngredientKey("olive oil")
+        )
+        XCTAssertEqual(
+            ShoppingListService.normalizedIngredientKey("fresh basil leaves"),
+            ShoppingListService.normalizedIngredientKey("basil")
+        )
+        XCTAssertEqual(
+            ShoppingListService.normalizedIngredientKey("finely chopped yellow onion"),
+            ShoppingListService.normalizedIngredientKey("yellow onion")
+        )
+    }
+
+    func testPluralFoldDoesNotOvermerge() {
+        // Colors and varietals are different purchases.
+        XCTAssertNotEqual(
+            ShoppingListService.normalizedIngredientKey("green onions"),
+            ShoppingListService.normalizedIngredientKey("yellow onion")
+        )
+        XCTAssertNotEqual(
+            ShoppingListService.normalizedIngredientKey("baking soda"),
+            ShoppingListService.normalizedIngredientKey("baking powder")
+        )
+        // Plurals of the same thing do merge.
+        XCTAssertEqual(
+            ShoppingListService.normalizedIngredientKey("tomatoes"),
+            ShoppingListService.normalizedIngredientKey("tomato")
+        )
+        XCTAssertEqual(
+            ShoppingListService.normalizedIngredientKey("berries"),
+            ShoppingListService.normalizedIngredientKey("berry")
+        )
+    }
+
     // MARK: - Unit Conversion
 
     func testWeightConversion() throws {
@@ -77,6 +117,14 @@ final class ShoppingListServiceTests: XCTestCase {
         // The bug this guards against: "3 cloves" being summed into "2 cups".
         XCTAssertNil(ShoppingListService.convertToCommonUnit(amount: 3, unit: "clove", targetUnit: "cup"))
         XCTAssertNil(ShoppingListService.convertToCommonUnit(amount: 1, unit: "pinch", targetUnit: "g"))
+    }
+
+    func testBareCountNeverConvertsIntoAMeasuredUnit() {
+        // "3" loose eggs must not become "3 lb" (or vice versa).
+        XCTAssertNil(ShoppingListService.convertToCommonUnit(amount: 1, unit: "", targetUnit: "lb"))
+        XCTAssertNil(ShoppingListService.convertToCommonUnit(amount: 2, unit: "cup", targetUnit: ""))
+        // Two bare counts still add.
+        XCTAssertNotNil(ShoppingListService.convertToCommonUnit(amount: 3, unit: "", targetUnit: ""))
     }
 
     func testSameUnitPassesThrough() throws {

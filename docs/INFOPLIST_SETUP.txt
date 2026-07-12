@@ -1,0 +1,25 @@
+# Info.plist Configuration Notes
+# ==============================
+#
+# DO NOT add an Info.plist file to the Xcode project.
+# Xcode auto-generates Info.plist — adding a second one causes build errors.
+# Keys go in: Target → Info tab → Custom iOS Target Properties, or
+# INFOPLIST_KEY_... build settings.
+#
+# Current state (verified 2026-07):
+# ---------------------------------
+# - No privacy usage keys are required today. Photo import uses PhotosPicker
+#   and PDF import uses UIDocumentPickerViewController; neither requires
+#   NSPhotoLibraryUsageDescription. There is NO camera capture in the app, so
+#   NSCameraUsageDescription must not be added until a camera feature exists
+#   (App Review rejects unused usage strings).
+# - PrivacyInfo.xcprivacy (in Recipes/Recipes/) carries the required-reason
+#   API declarations (UserDefaults CA92.1, file timestamps C617.1). It ships
+#   with the app via the file-synchronized group.
+# - The Claude API (api.anthropic.com) is HTTPS-only; no ATS exceptions.
+#
+# If you later add "open PDF/JSON from the share sheet":
+# ------------------------------------------------------
+# Add Document Types in the Info tab (com.adobe.pdf and public.json, role
+# Viewer) AND wire an onOpenURL/DocumentGroup handler — the plist entry alone
+# does nothing. This is currently NOT configured.

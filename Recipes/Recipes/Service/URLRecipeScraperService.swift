@@ -63,22 +63,26 @@ class URLRecipeScraperService: ObservableObject {
         if httpResponse.expectedContentLength > Int64(maxPageBytes) {
             throw ScraperError.pageTooLarge
         }
-        var data = Data()
-        data.reserveCapacity(min(Int(max(httpResponse.expectedContentLength, 0)), maxPageBytes))
-        for try await byte in bytes {
-            data.append(byte)
-            if data.count > maxPageBytes { throw ScraperError.pageTooLarge }
-        }
+        let data = try await Self.collect(
+            bytes,
+            reserving: min(Int(max(httpResponse.expectedContentLength, 0)), maxPageBytes),
+            cap: maxPageBytes
+        )
 
         let html: String
         if let utf8 = String(data: data, encoding: .utf8) {
             html = utf8
         } else if let cp1252 = String(data: data, encoding: .windowsCP1252) {
-            // Windows-1252 accepts any byte sequence, so legacy-encoded pages
-            // still import instead of failing outright — and unlike Latin-1 it
-            // maps 0x80-0x9F to real curly quotes/dashes rather than C1
-            // control characters.
+            // Windows-1252 maps 0x80-0x9F to real curly quotes/dashes rather
+            // than C1 control characters, so legacy-encoded Western pages
+            // import with correct punctuation.
             html = cp1252
+        } else if let latin1 = String(data: data, encoding: .isoLatin1) {
+            // Latin-1 is total (every byte sequence decodes), so pages in
+            // encodings CP1252 rejects (e.g. undefined 0x81/0x8D lead bytes
+            // from CJK encodings) still reach the JSON-LD scan — the ASCII
+            // structure survives even if non-ASCII text is garbled.
+            html = latin1
         } else {
             throw ScraperError.decodeFailed
         }
@@ -109,6 +113,23 @@ class URLRecipeScraperService: ObservableObject {
     
     // MARK: - JSON-LD Extraction
     
+    /// Buffers a byte stream up to `cap`. Nonisolated so the up-to-10M-iteration
+    /// loop runs on the cooperative pool instead of hitching the main actor
+    /// (scrapeRecipe is @MainActor for its @Published progress updates).
+    private nonisolated static func collect(
+        _ bytes: URLSession.AsyncBytes,
+        reserving capacity: Int,
+        cap: Int
+    ) async throws -> Data {
+        var data = Data()
+        data.reserveCapacity(capacity)
+        for try await byte in bytes {
+            data.append(byte)
+            if data.count > cap { throw ScraperError.pageTooLarge }
+        }
+        return data
+    }
+
     private func extractJSONLD(from html: String, sourceURL: String) throws -> Recipe {
         // Find all <script type="application/ld+json"> blocks
         let pattern = #"<script[^>]*type\s*=\s*["']application/ld\+json["'][^>]*>([\s\S]*?)</script>"#

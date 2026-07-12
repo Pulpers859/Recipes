@@ -52,6 +52,10 @@ final class TimerNotificationService {
         content.title = "\(label) finished"
         content.body = recipeTitle
         content.sound = .default
+        // A cooking timer is exactly what time-sensitive is for: it should
+        // break through Focus. The system downgrades it gracefully when the
+        // entitlement isn't present.
+        content.interruptionLevel = .timeSensitive
 
         let interval = max(fireDate.timeIntervalSinceNow, 1)
         let trigger = UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)
@@ -60,7 +64,13 @@ final class TimerNotificationService {
             content: content,
             trigger: trigger
         )
-        UNUserNotificationCenter.current().add(request)
+        UNUserNotificationCenter.current().add(request) { error in
+            if error != nil {
+                // The in-app countdown still runs; leave a crash-clue trail
+                // for "my timer never rang" reports.
+                AnalyticsService.shared.track("timer_notification_schedule_failed")
+            }
+        }
     }
 
     func cancelTimerNotification(stepID: UUID) {

@@ -107,6 +107,18 @@ def parse_minutes(value: str) -> int:
         seconds = int(match.group(3) or 0)
         return (hours * 60) + minutes + (1 if seconds >= 30 else 0)
 
+    # Text durations: honor hour/minute words so "1 hour 30 minutes"
+    # is 90, not 1. Bare numbers are treated as minutes.
+    hours = re.search(r"(\d+(?:\.\d+)?)\s*(?:HOURS?|HRS?|H\b)", value)
+    minutes = re.search(r"(\d+)\s*(?:MINUTES?|MINS?|M\b)", value)
+    if hours or minutes:
+        total = 0.0
+        if hours:
+            total += float(hours.group(1)) * 60
+        if minutes:
+            total += int(minutes.group(1))
+        return int(round(total))
+
     nums = [int(n) for n in re.findall(r"\d+", value)]
     if not nums:
         return 0
@@ -243,7 +255,9 @@ def collect_images_as_base64(block: str, source_root: Path) -> list[str]:
         seen.add(normalized)
 
         full_path = (source_root / normalized).resolve()
-        if not str(full_path).startswith(str(source_root.resolve())):
+        # is_relative_to is separator-aware; the old prefix check let a
+        # sibling directory like "root2" pass a check against "root".
+        if not full_path.is_relative_to(source_root.resolve()):
             continue
         if not full_path.exists():
             continue

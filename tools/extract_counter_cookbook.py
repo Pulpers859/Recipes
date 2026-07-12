@@ -568,7 +568,7 @@ def parse_recipe(start_page_text: str, chunk_text: str, recipe_index: int) -> di
         "photoData": [],
         "dateLastCooked": None,
         "originalPDFData": None,
-        "dateAdded": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "dateAdded": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "timesCooked": 0,
     }
 
@@ -594,7 +594,7 @@ def extract_recipes(pdf_path: Path) -> list[dict]:
 def build_export_wrapper(recipes: list[dict]) -> dict:
     return {
         "version": 2,
-        "exportDate": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "exportDate": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "recipeCount": len(recipes),
         "recipes": recipes,
     }

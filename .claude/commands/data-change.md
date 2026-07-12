@@ -13,7 +13,7 @@ Before editing, trace the impact across:
 - `Service/RecipeExportService.swift`
 - `Views/SettingsView.swift`
 - `Service/RecipeConflictResolverService.swift`
-- `extract_counter_cookbook.py`
-- `extract_recipe_keeper.py`
+- `tools/extract_counter_cookbook.py`
+- `tools/extract_recipe_keeper.py`
 
 Prefer additive, backward-compatible changes. If compatibility breaks, call it out explicitly and keep the migration narrow.

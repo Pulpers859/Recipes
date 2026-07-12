@@ -16,7 +16,6 @@ struct RecipeDetailView: View {
     @State private var showPhotoViewer = false
     @State private var actionErrorMessage: String?
     @State private var isWritingBackup = false
-    @State private var decodedImages: [Data: UIImage] = [:]
 
     init(recipe: Recipe) {
         self.recipe = recipe
@@ -24,10 +23,10 @@ struct RecipeDetailView: View {
     }
 
     private func cachedImage(for data: Data) -> UIImage? {
-        if let cached = decodedImages[data] { return cached }
-        guard let image = UIImage(data: data) else { return nil }
-        DispatchQueue.main.async { decodedImages[data] = image }
-        return image
+        // Downsampled via the shared cache: the detail banner renders at
+        // ~280 pt, and the old dictionary keyed on the full photo Data —
+        // hashing multi-MB blobs and holding full-res decodes per body pass.
+        RecipeThumbnailCache.shared.thumbnail(for: data, recipeID: recipe.id, maxPixelSize: 900)
     }
 
     var body: some View {
