@@ -1,6 +1,58 @@
 # Recipe Vault App Review Findings
 
-Last reviewed: 2026-07-11 (second full-app audit; June findings below preserved for history)
+Last reviewed: 2026-07-12 (third full-app audit; earlier findings below preserved for history)
+
+## Third-Pass Audit (2026-07-11/12)
+
+Four parallel lanes: an adversarial review of the second pass's own fix diff, a deep sweep of the least-audited files (app stack, analytics, Spotlight, timers, models, pbxproj, Python scripts), a feasibility pass over everything previously deferred, and a UI/UX audit against `docs/UI_UX_FOUNDATION.md`. Fixes were validated on a local Windows Swift 6.3 harness that compiles the pure-logic services and runs the full test suite (71 tests, all passing), including a new simulated-user stress suite (real ingredient corpus, hostile-URL zoo, sloppy AI JSON, 200-recipe backup round trip, year-boundary meal weeks).
+
+### Fixed — data safety / backup
+
+80. **Full-app backup (format v4)** — exports and the rolling pre-delete safety backup now carry pantry items, shopping items, and meal plans as optional sections. v1–v3 files import unchanged; recipes-only exports keep their old shape; newer-version files are still refused explicitly. Import merges additively (skip by id; pantry also by normalized name; plans merge per week without duplicating entries). Delete All is now genuinely fully recoverable. Round-trip tests with v1/v3/v4 fixtures added (June future-work #5 done).
+81. **Safety backup off the main thread** — every destructive path (single delete, bulk delete, delete all, resolve duplicates) snapshots on the main actor, then encodes + writes on a background task behind a blocking progress overlay. The abort-if-backup-fails guarantee is structurally unchanged; a photo-heavy library no longer freezes for seconds per delete. The rolling backup also dropped pretty-printing.
+82. **Fractional-second ISO 8601 dates import** — the strict `.iso8601` decoder made every record of `extract_counter_cookbook.py` output (microsecond timestamps) read as unreadable, failing whole backups with "no readable recipes". Decoder is now tolerant; the script also emits second-precision timestamps.
+83. **Store-recovery notice survives until acknowledged** — a successful open no longer wipes the "your library was reset" flag before the user has tapped OK.
+
+### Fixed — import trust
+
+84. **String-shaped AI output decodes** — ingredients/steps emitted as plain strings (common model drift) now route through the shared line parser instead of being dropped wholesale, which could save a silently ingredient-less recipe past the fallback guard. Batch AI parse also gained the same empty-salvage guard as the single path (a garbage array element can't become a blank "Imported Recipe" that suppresses the skip warning).
+85. **Failed per-page OCR keeps original text** — an empty OCR result no longer overwrites real (short) selectable page text.
+86. **Batch import order + PDF survival** — recovered recipes return to their original document positions; excluding the first recipe in batch review no longer silently loses the imported PDF (it moves to the first accepted recipe).
+87. **SSRF: trailing-dot bypass** — `http://localhost./` (FQDN form) passed the blocklist; hosts are now normalized. Full hostile-URL zoo committed as `URLSafetyValidatorTests` so it runs under Cmd+U.
+
+### Fixed — shopping list quality (found by executing a real corpus)
+
+88. **Bare counts never convert into measured units** — `convertToCommonUnit(1, "", "lb")` returned "1 lb"; empty-unit ↔ measured-unit is now a refusal (separate lines), closing the "3 eggs + 2 lb" class at the aggregation layer.
+89. **Merge keys handle butcher/produce qualifiers and plurals** — "boneless skinless chicken breasts" now merges with "chicken breast"; extra-virgin/finely/coarsely/thinly/leaves stripped; light plural fold (tomatoes/berries) with color/varietal words deliberately preserved (green vs yellow onion stay distinct). "ground cinnamon" no longer lands in the meat aisle.
+
+### Fixed — trust presentation (UI)
+
+90. **Pantry status messages have explicit tone** — data-safety failures rendered as a calm beige card that auto-cleared in 4 s; now `RVStatusBanner` with per-site tone, 6 s success / 12 s error-warning holds.
+91. **Settings banners carry explicit error flags** — the last string-sniffed tones removed; "Clipboard does not contain JSON text." no longer renders green; partial imports are flagged as errors end-to-end (`importBackup` returns a `MaintenanceOutcome`).
+92. **Design system adopted on the two flagship screens** — RecipeListView and ShoppingListView heroes use `RVHeroBanner` (extended with a footer slot) and `RVMetricPill` instead of drifted hand-rolled copies; duplicate toolbar sort control (wearing a filter icon) removed; developer-voice copy rewritten ("tools you already built", "still intact", layout narration); "SwiftUI + Claude" About row replaced.
+93. **Interaction polish** — visible delete on shopping rows (was long-press-only); 44 pt targets on pantry row buttons, cooking-mode ingredients toggle (now VoiceOver-labeled), editor photo delete; FilterChip announces selection; keyboard dismisses on scroll; real pluralization in destructive confirmations (Title Case, no "(s)").
+
+### Fixed — plumbing
+
+94. Page fetch buffers its up-to-10 MB stream off the main actor; CP1252-undecodable legacy pages fall back to Latin-1 (total) instead of failing. Thumbnail cache keys include pixel size (editor's 200 px request could blur the list's 700 px cards); RecipeDetailView uses the downsampling cache instead of full-res per-body decodes. Spotlight indexes right after backup import and batch save. Timer notifications are time-sensitive and scheduling failures leave an analytics trail. Meal-plan title-sync/retarget fetch failures are tracked instead of swallowed. `SampleRecipeService` (dead code) deleted. Migration scripts moved to `tools/` so the file-synchronized app target can't bundle them (`__pycache__` deleted); `parse_minutes` handles "1 hour 30 minutes" (was: 1 minute — verified by execution); path containment uses `is_relative_to`; `INFOPLIST_SETUP.txt` rewritten to match reality (no camera exists; no usage keys currently required).
+
+### Known Remaining (updated)
+
+- DNS rebinding, cert pinning: unchanged accepted risks.
+- PDF chunk-splitter heuristics: still macro-cookbook-tuned; batch review remains the mitigation (needs a real PDF corpus to retune safely).
+- `RecipeListView` (~900 lines) decomposition: deferred until next real bug in that file.
+- Batch-save failure recovery relies on delete-then-reinsert of unsaved models (undocumented SwiftData semantics) — needs a device test of the save-fail path.
+- `RecipeDetailView` holds a `@Bindable` deleted model briefly before dismiss (recent SwiftData faults instead of crashing; iOS-version dependent).
+- Per-recipe PDF page-slicing for batch imports (whole PDF still attaches to one recipe).
+- Spotlight items expire after 90 days if the app is never opened; per-launch reindex mitigates.
+- Non-Gregorian day labels / first-weekday re-bucketing: display-level, deferred until localization exists.
+- Dark mode remains deliberately locked to light (documented tradeoff); real support would be a project.
+
+### Validation limits
+
+No Xcode on the audit machine: all Views/SwiftData/UIKit changes are compile-unverified locally (the pure-logic services and all 71 unit tests run on the Windows Swift harness). Before shipping: build in Xcode, run the test target (new files: `RecipeExportRoundTripTests`, `AIParsedRecipeTests`, `URLSafetyValidatorTests`), and smoke-test delete flows (blocking overlay), batch import, pantry status banners, and the two redesigned heroes.
+
+---
 
 ## Second-Pass Audit (2026-07-11)
 

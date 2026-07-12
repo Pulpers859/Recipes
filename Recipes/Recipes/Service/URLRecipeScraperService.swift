@@ -658,9 +658,15 @@ enum URLSafetyValidator {
 
     static func isBlockedHost(_ rawHost: String) -> Bool {
         // URL.host strips brackets from IPv6 literals; normalise just in case.
-        let host = rawHost
+        var host = rawHost
             .trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
             .lowercased()
+        // A single trailing dot is the fully-qualified form of the same name
+        // ("localhost." resolves exactly like "localhost") — strip it so the
+        // suffix/equality checks below can't be dodged with one character.
+        if host.hasSuffix(".") {
+            host = String(host.dropLast())
+        }
 
         if host.isEmpty { return true }
         if host == "localhost" || host.hasSuffix(".localhost") { return true }
