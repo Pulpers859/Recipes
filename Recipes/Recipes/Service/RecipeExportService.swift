@@ -11,6 +11,7 @@ class RecipeExportService {
     /// Export the library as a JSON backup file. Since format v4 the backup
     /// can also carry pantry items, shopping items, and meal plans as
     /// optional top-level keys — older (v1–v3) files import unchanged.
+    @MainActor
     static func exportAsJSON(
         recipes: [Recipe],
         pantryItems: [PantryItem] = [],
@@ -29,8 +30,8 @@ class RecipeExportService {
 
     // MARK: - Automatic Safety Backup
 
-    private static let backupDirectoryName = "RecipeVault/Backups"
-    private static let automaticBackupFilename = "RecipeVault-Recipes-Latest.json"
+    private nonisolated static let backupDirectoryName = "RecipeVault/Backups"
+    private nonisolated static let automaticBackupFilename = "RecipeVault-Recipes-Latest.json"
 
     /// Immutable snapshot of everything the backup persists. Captured on the
     /// main actor (where the SwiftData models live) so the expensive encode
@@ -46,6 +47,7 @@ class RecipeExportService {
     /// Cheap — `Data` fields are copy-on-write, so photos aren't copied.
     /// Call this on the actor that owns the models (in the app, the main
     /// actor); only the returned payload may cross to a background task.
+    @MainActor
     static func makeBackupPayload(
         recipes: [Recipe],
         pantryItems: [PantryItem] = [],
@@ -66,7 +68,7 @@ class RecipeExportService {
     /// the result BEFORE deleting anything — a failed backup aborts the
     /// delete, exactly as before.
     @discardableResult
-    static func writeAutomaticBackup(payload: BackupPayload) async throws -> URL {
+    nonisolated static func writeAutomaticBackup(payload: BackupPayload) async throws -> URL {
         try await Task.detached(priority: .userInitiated) {
             // Compact encoding: this is a rolling machine-read safety file,
             // and pretty-printing base64 photo blobs doubles nothing but time.
@@ -85,7 +87,7 @@ class RecipeExportService {
         }.value
     }
 
-    private static func encode(_ payload: BackupPayload, outputFormatting: JSONEncoder.OutputFormatting) throws -> Data {
+    private nonisolated static func encode(_ payload: BackupPayload, outputFormatting: JSONEncoder.OutputFormatting) throws -> Data {
         let wrapper = ExportWrapper(
             version: currentBackupVersion,
             exportDate: Date(),
@@ -103,7 +105,7 @@ class RecipeExportService {
 
     /// Current backup schema version produced by `exportAsJSON`.
     /// v4 added optional pantry/shopping/meal-plan sections.
-    static let currentBackupVersion = 4
+    nonisolated static let currentBackupVersion = 4
 
     /// Result of a backup import: the decoded records plus how many recipe
     /// records in the file could NOT be read, so the UI can tell the user
@@ -478,6 +480,24 @@ private struct ExportWrapper: Codable {
     let pantryItems: [ExportablePantryItem]?
     let shoppingItems: [ExportableShoppingItem]?
     let mealPlans: [ExportableMealPlan]?
+
+    nonisolated init(
+        version: Int,
+        exportDate: Date,
+        recipeCount: Int,
+        recipes: [ExportableRecipe],
+        pantryItems: [ExportablePantryItem]?,
+        shoppingItems: [ExportableShoppingItem]?,
+        mealPlans: [ExportableMealPlan]?
+    ) {
+        self.version = version
+        self.exportDate = exportDate
+        self.recipeCount = recipeCount
+        self.recipes = recipes
+        self.pantryItems = pantryItems
+        self.shoppingItems = shoppingItems
+        self.mealPlans = mealPlans
+    }
 }
 
 /// Lenient counterpart used only for import. `version` is optional (older

@@ -69,7 +69,7 @@ struct ShoppingListView: View {
                 .padding()
                 .padding(.bottom, 28)
             }
-            .scrollDismissesKeyboard(.onDrag)
+            .scrollDismissesKeyboard(.interactively)
             .background(Color.rvBackground.ignoresSafeArea())
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)

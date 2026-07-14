@@ -127,30 +127,26 @@ struct RecipeListView: View {
 
     var body: some View {
         NavigationStack(path: $navigationPath) {
-            Group {
-                if recipes.isEmpty {
-                    emptyStateView
-                } else {
-                    recipeListContent
-                }
-            }
-            .scrollDismissesKeyboard(.onDrag)
+            recipeListRoot
+        }
+    }
+
+    @ViewBuilder
+    private var visibleRecipesContent: some View {
+        if recipes.isEmpty {
+            emptyStateView
+        } else {
+            recipeListContent
+        }
+    }
+
+    private var recipeListRoot: some View {
+        visibleRecipesContent
+            .scrollDismissesKeyboard(.interactively)
             .background(Color.rvBackground.ignoresSafeArea())
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItemGroup(placement: .primaryAction) {
-                    importMenu
-
-                    Button {
-                        showingAddRecipe = true
-                    } label: {
-                        Image(systemName: "plus.circle.fill")
-                    }
-                    .accessibilityLabel("Add recipe manually")
-                }
-
-            }
+            .toolbar { recipeListToolbar }
             .sheet(isPresented: $showingAddRecipe) {
                 NavigationStack {
                     RecipeEditorView(recipe: nil)
@@ -160,21 +156,9 @@ struct RecipeListView: View {
                 ImportView(parser: parser)
             }
             .navigationDestination(for: RecipeRoute.self) { route in
-                if let recipe = recipes.first(where: { $0.id == route.recipeID }) {
-                    RecipeDetailView(recipe: recipe)
-                } else {
-                    ContentUnavailableView("Recipe Not Found", systemImage: "exclamationmark.triangle")
-                }
+                recipeDestination(for: route)
             }
-            .onAppear {
-                routePendingSpotlightRecipe()
-                // Keep the system Spotlight index in sync with the library so
-                // recipes are actually findable from iOS search. Full reindex
-                // happens once per launch; saves/deletes update incrementally.
-                if !recipes.isEmpty {
-                    SpotlightIndexingService.shared.indexAllRecipesIfNeeded(recipes)
-                }
-            }
+            .onAppear(perform: handleAppear)
             .task(id: pantrySuggestionKey) {
                 pantrySuggestions = computePantrySuggestions()
             }
@@ -184,13 +168,7 @@ struct RecipeListView: View {
             .onChange(of: selectedCategory) { _, _ in clearSelectionOnFilterChange() }
             .onChange(of: showFavoritesOnly) { _, _ in clearSelectionOnFilterChange() }
             .task(id: searchText) {
-                // Debounce: cancelled (throws) when searchText changes again.
-                if searchText.isEmpty {
-                    debouncedSearchText = ""
-                    return
-                }
-                guard (try? await Task.sleep(for: .milliseconds(250))) != nil else { return }
-                debouncedSearchText = searchText
+                await updateDebouncedSearchText()
             }
             .onChange(of: navigationState.spotlightRecipeID) { _, newID in
                 pendingSpotlightRecipeID = newID
@@ -203,7 +181,7 @@ struct RecipeListView: View {
                 Button("Delete", role: .destructive) { Task { await deleteSelectedRecipes() } }
                 Button("Cancel", role: .cancel) { }
             } message: {
-                Text("This permanently deletes \(selectedRecipeIDs.count) \(selectedRecipeIDs.count == 1 ? "recipe" : "recipes") and removes \(selectedRecipeIDs.count == 1 ? "it" : "them") from your meal plan. A safety backup of your library is saved on this device first.")
+                Text(deleteSelectedConfirmationMessage)
             }
             .overlay {
                 if isWritingBackup {
@@ -218,6 +196,52 @@ struct RecipeListView: View {
             } message: {
                 Text(actionErrorMessage ?? "An unknown error occurred.")
             }
+    }
+
+    @ToolbarContentBuilder
+    private var recipeListToolbar: some ToolbarContent {
+        ToolbarItemGroup(placement: .primaryAction) {
+            importMenu
+
+            Button {
+                showingAddRecipe = true
+            } label: {
+                Image(systemName: "plus.circle.fill")
+            }
+            .accessibilityLabel("Add recipe manually")
+        }
+    }
+
+    private var deleteSelectedConfirmationMessage: String {
+        "This permanently deletes \(selectedRecipeIDs.count) \(selectedRecipeIDs.count == 1 ? "recipe" : "recipes") and removes \(selectedRecipeIDs.count == 1 ? "it" : "them") from your meal plan. A safety backup of your library is saved on this device first."
+    }
+
+    private func handleAppear() {
+        routePendingSpotlightRecipe()
+        // Keep the system Spotlight index in sync with the library so
+        // recipes are actually findable from iOS search. Full reindex
+        // happens once per launch; saves/deletes update incrementally.
+        if !recipes.isEmpty {
+            SpotlightIndexingService.shared.indexAllRecipesIfNeeded(recipes)
+        }
+    }
+
+    private func updateDebouncedSearchText() async {
+        // Debounce: cancelled (throws) when searchText changes again.
+        if searchText.isEmpty {
+            debouncedSearchText = ""
+            return
+        }
+        guard (try? await Task.sleep(for: .milliseconds(250))) != nil else { return }
+        debouncedSearchText = searchText
+    }
+
+    @ViewBuilder
+    private func recipeDestination(for route: RecipeRoute) -> some View {
+        if let recipe = recipes.first(where: { $0.id == route.recipeID }) {
+            RecipeDetailView(recipe: recipe)
+        } else {
+            ContentUnavailableView("Recipe Not Found", systemImage: "exclamationmark.triangle")
         }
     }
 
