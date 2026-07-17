@@ -1,0 +1,57 @@
+name: iOS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Build and test (iPhone simulator)
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Show Xcode and simulator inventory
+        run: |
+          xcodebuild -version
+          xcrun simctl list runtimes
+
+      - name: Ensure an iOS simulator runtime is installed
+        run: |
+          if ! xcrun simctl list runtimes | grep -q "^iOS"; then
+            sudo xcodebuild -downloadPlatform iOS
+          fi
+
+      - name: Build and test
+        run: |
+          set -o pipefail
+          if command -v xcbeautify >/dev/null 2>&1; then
+            FORMATTER=(xcbeautify --renderer github-actions)
+          else
+            FORMATTER=(cat)
+          fi
+          xcodebuild test \
+            -project Recipes/Recipes.xcodeproj \
+            -scheme Recipes \
+            -destination 'platform=iOS Simulator,name=iPhone 17' \
+            -resultBundlePath TestResults.xcresult \
+            CODE_SIGNING_ALLOWED=NO \
+            | tee xcodebuild.log | "${FORMATTER[@]}"
+
+      - name: Upload logs and results on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            TestResults.xcresult
+            xcodebuild.log
+          if-no-files-found: ignore
+          retention-days: 14
