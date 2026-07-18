@@ -1,0 +1,27 @@
+{
+  "kind": "manual",
+  "title": "Simple Arugula Salad",
+  "ingredients": [
+    {
+      "name": "baby arugula",
+      "amount": 4,
+      "unit": "cups"
+    },
+    {
+      "name": "salt and pepper to taste"
+    },
+    {
+      "name": "olive oil for drizzling"
+    },
+    {
+      "name": "juice of half a lemon"
+    },
+    {
+      "name": "shaved parmesan"
+    }
+  ],
+  "steps": [
+    "Toss the arugula with olive oil and lemon juice.",
+    "Season and top with parmesan."
+  ]
+}

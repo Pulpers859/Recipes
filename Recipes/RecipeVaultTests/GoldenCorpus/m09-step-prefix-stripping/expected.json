@@ -1,0 +1,31 @@
+{
+  "kind": "manual",
+  "title": "Honey Garlic Salmon",
+  "ingredients": [
+    {
+      "name": "salmon fillets",
+      "amount": 4
+    },
+    {
+      "name": "honey",
+      "amount": 3,
+      "unit": "tbsp"
+    },
+    {
+      "name": "garlic, minced",
+      "amount": 2,
+      "unit": "cloves"
+    },
+    {
+      "name": "soy sauce",
+      "amount": 1,
+      "unit": "tbsp"
+    }
+  ],
+  "steps": [
+    "Preheat the oven to 400°F.",
+    "Whisk the honey, garlic, and soy sauce together.",
+    "Brush the salmon with the glaze.",
+    "Bake for 12 minutes until flaky."
+  ]
+}

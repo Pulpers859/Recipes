@@ -1,0 +1,41 @@
+{
+  "kind": "manual",
+  "title": "Classic Buttermilk Pancakes",
+  "ingredients": [
+    {
+      "name": "all-purpose flour",
+      "amount": 2,
+      "unit": "cups"
+    },
+    {
+      "name": "sugar",
+      "amount": 2,
+      "unit": "tbsp"
+    },
+    {
+      "name": "baking soda",
+      "amount": 1,
+      "unit": "tsp"
+    },
+    {
+      "name": "large eggs",
+      "amount": 2
+    },
+    {
+      "name": "buttermilk",
+      "amount": 2,
+      "unit": "cups"
+    },
+    {
+      "name": "unsalted butter, melted",
+      "amount": 4,
+      "unit": "tbsp"
+    }
+  ],
+  "steps": [
+    "Whisk the flour, sugar, and baking soda in a large bowl.",
+    "Beat the eggs with the buttermilk and melted butter.",
+    "Fold the wet mixture into the dry until just combined.",
+    "Cook on a hot griddle until bubbles form, then flip."
+  ]
+}

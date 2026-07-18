@@ -1,0 +1,34 @@
+{
+  "kind": "manual",
+  "title": "Rustic Tomato Soup",
+  "ingredients": [
+    {
+      "name": "olive oil",
+      "amount": 2,
+      "unit": "tbsp"
+    },
+    {
+      "name": "yellow onion, diced",
+      "amount": 1
+    },
+    {
+      "name": "garlic, minced",
+      "amount": 3,
+      "unit": "cloves"
+    },
+    {
+      "name": "1 28-oz can crushed tomatoes"
+    },
+    {
+      "name": "vegetable broth",
+      "amount": 2,
+      "unit": "cups"
+    }
+  ],
+  "steps": [
+    "Heat the oil in a Dutch oven over medium heat.",
+    "Cook the onion and garlic until soft.",
+    "Add the tomatoes and broth and simmer 30 minutes.",
+    "Blend until smooth and season to taste."
+  ]
+}

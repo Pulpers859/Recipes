@@ -1,0 +1,35 @@
+{
+  "kind": "manual",
+  "title": "Weeknight Veggie Stir Fry",
+  "ingredients": [
+    {
+      "name": "sesame oil",
+      "amount": 2,
+      "unit": "tbsp"
+    },
+    {
+      "name": "red bell pepper, sliced",
+      "amount": 1
+    },
+    {
+      "name": "broccoli florets",
+      "amount": 2,
+      "unit": "cups"
+    },
+    {
+      "name": "soy sauce",
+      "amount": 3,
+      "unit": "tbsp"
+    },
+    {
+      "name": "honey",
+      "amount": 1,
+      "unit": "tbsp"
+    }
+  ],
+  "steps": [
+    "Heat the sesame oil in a wok over high heat.",
+    "Add the vegetables and stir-fry for five minutes.",
+    "Add the soy sauce and honey and toss to coat."
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "kind": "manual",
+  "title": "Weeknight Marinara",
+  "ingredients": [
+    {
+      "name": "olive oil",
+      "amount": 2,
+      "unit": "tbsp"
+    },
+    {
+      "name": "garlic, thinly sliced",
+      "amount": 4,
+      "unit": "cloves"
+    },
+    {
+      "name": "1 28-oz can San Marzano whole peeled tomatoes, drained and crushed by hand"
+    },
+    {
+      "name": "dried oregano",
+      "amount": 1,
+      "unit": "tsp"
+    },
+    {
+      "name": "fresh basil leaves"
+    }
+  ],
+  "steps": [
+    "Warm the oil and garlic in a cold pan over medium heat.",
+    "Add the tomatoes and oregano and simmer 25 minutes.",
+    "Tear in the basil off the heat."
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "kind": "manual",
+  "title": "Midnight Chocolate Chip Cookies",
+  "ingredients": [
+    {
+      "name": "all-purpose flour",
+      "amount": 2,
+      "unit": "cups"
+    },
+    {
+      "name": "dark chocolate chips",
+      "amount": 1,
+      "unit": "cup"
+    },
+    {
+      "name": "brown sugar",
+      "amount": 1,
+      "unit": "cup"
+    },
+    {
+      "name": "large eggs",
+      "amount": 2
+    },
+    {
+      "name": "vanilla extract",
+      "amount": 1,
+      "unit": "tsp"
+    }
+  ],
+  "steps": [
+    "Cream the sugar and eggs together.",
+    "Fold in the flour and chocolate chips.",
+    "Chill the dough for one hour.",
+    "Bake at 350°F for 11 minutes."
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "kind": "manual",
+  "title": "Thai Peanut Noodles",
+  "ingredients": [
+    {
+      "name": "rice noodles",
+      "amount": 8,
+      "unit": "oz"
+    },
+    {
+      "name": "creamy peanut butter",
+      "amount": 0.25,
+      "unit": "cup"
+    },
+    {
+      "name": "soy sauce",
+      "amount": 2,
+      "unit": "tbsp"
+    },
+    {
+      "name": "lime juice",
+      "amount": 1,
+      "unit": "tbsp"
+    },
+    {
+      "name": "red pepper flakes",
+      "amount": 0.5,
+      "unit": "tsp"
+    },
+    {
+      "name": "warm water",
+      "amount": 0.333,
+      "unit": "cup"
+    }
+  ],
+  "steps": [
+    "Cook the noodles according to the package.",
+    "Whisk the peanut butter, soy sauce, lime juice, and water into a sauce.",
+    "Toss the noodles with the sauce and pepper flakes."
+  ]
+}

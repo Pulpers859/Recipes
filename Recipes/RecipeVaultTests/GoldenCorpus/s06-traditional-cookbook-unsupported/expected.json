@@ -1,0 +1,9 @@
+{
+  "kind": "split",
+  "expectedChunkCount": 3,
+  "chunkMarkers": [
+    "Roast Chicken with Herbs",
+    "Braised Leeks",
+    "Apple Galette"
+  ]
+}

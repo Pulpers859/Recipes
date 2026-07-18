@@ -1,0 +1,32 @@
+{
+  "kind": "manual",
+  "title": "Skillet Garlic Butter Shrimp",
+  "ingredients": [
+    {
+      "name": "large shrimp, peeled and deveined",
+      "amount": 1,
+      "unit": "lb"
+    },
+    {
+      "name": "butter",
+      "amount": 4,
+      "unit": "tbsp"
+    },
+    {
+      "name": "garlic, minced",
+      "amount": 5,
+      "unit": "cloves"
+    },
+    {
+      "name": "juice of one lemon"
+    },
+    {
+      "name": "chopped parsley for garnish"
+    }
+  ],
+  "steps": [
+    "Melt the butter in a large skillet over medium-high heat. Add the garlic and cook until fragrant.",
+    "Add the shrimp and cook two minutes per side. Squeeze the lemon over the top.",
+    "Garnish with parsley and serve immediately."
+  ]
+}

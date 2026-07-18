@@ -1,0 +1,35 @@
+{
+  "kind": "manual",
+  "title": "GRILLED CHICKEN POWER BOWL",
+  "ingredients": [
+    {
+      "name": "chicken breast",
+      "amount": 300,
+      "unit": "g"
+    },
+    {
+      "name": "cooked brown rice",
+      "amount": 1,
+      "unit": "cup"
+    },
+    {
+      "name": "baby spinach",
+      "amount": 2,
+      "unit": "cups"
+    },
+    {
+      "name": "olive oil",
+      "amount": 1,
+      "unit": "tbsp"
+    },
+    {
+      "name": "avocado, sliced",
+      "amount": 0.5
+    }
+  ],
+  "steps": [
+    "Season the chicken and grill six minutes per side.",
+    "Slice the chicken and arrange over the rice and spinach.",
+    "Top with avocado and drizzle with olive oil."
+  ]
+}

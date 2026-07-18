@@ -1,0 +1,9 @@
+{
+  "kind": "split",
+  "expectedChunkCount": 3,
+  "chunkMarkers": [
+    "GRILLED CHICKEN POWER BOWL",
+    "TURKEY TACO SKILLET",
+    "PROTEIN PANCAKES"
+  ]
+}

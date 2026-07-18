@@ -1,0 +1,36 @@
+{
+  "kind": "manual",
+  "title": "High Protein Overnight Oats",
+  "ingredients": [
+    {
+      "name": "rolled oats",
+      "amount": 80,
+      "unit": "g"
+    },
+    {
+      "name": "almond milk",
+      "amount": 250,
+      "unit": "ml"
+    },
+    {
+      "name": "vanilla protein powder",
+      "amount": 30,
+      "unit": "g"
+    },
+    {
+      "name": "chia seeds",
+      "amount": 15,
+      "unit": "g"
+    },
+    {
+      "name": "peanut butter",
+      "amount": 1,
+      "unit": "tbsp"
+    }
+  ],
+  "steps": [
+    "Stir all the ingredients together in a jar.",
+    "Seal and refrigerate overnight.",
+    "Top with berries before serving."
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "kind": "manual",
+  "title": "Game Day Turkey Chili",
+  "ingredients": [
+    {
+      "name": "ground turkey",
+      "amount": 1,
+      "unit": "lb"
+    },
+    {
+      "name": "black beans",
+      "amount": 1,
+      "unit": "can"
+    },
+    {
+      "name": "diced tomatoes",
+      "amount": 1,
+      "unit": "can"
+    },
+    {
+      "name": "chili powder",
+      "amount": 2,
+      "unit": "tbsp"
+    },
+    {
+      "name": "beef broth",
+      "amount": 1,
+      "unit": "cup"
+    }
+  ],
+  "steps": [
+    "Brown the turkey in a large pot.",
+    "Add the beans, tomatoes, chili powder, and broth.",
+    "Simmer uncovered for 45 minutes."
+  ]
+}

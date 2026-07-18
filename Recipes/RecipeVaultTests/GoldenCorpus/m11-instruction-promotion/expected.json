@@ -1,0 +1,26 @@
+{
+  "kind": "manual",
+  "title": "Sunday Meal Prep Chicken",
+  "ingredients": [
+    {
+      "name": "chicken thighs",
+      "amount": 2,
+      "unit": "lbs"
+    },
+    {
+      "name": "smoked paprika",
+      "amount": 1,
+      "unit": "tbsp"
+    },
+    {
+      "name": "garlic powder",
+      "amount": 1,
+      "unit": "tsp"
+    }
+  ],
+  "steps": [
+    "Whisk the spices together in a small bowl. Rub the mixture all over the chicken.",
+    "Roast at 425°F for 35 minutes.",
+    "Rest for 10 minutes before slicing."
+  ]
+}

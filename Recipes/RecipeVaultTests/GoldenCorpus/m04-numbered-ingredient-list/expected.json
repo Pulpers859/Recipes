@@ -1,0 +1,32 @@
+{
+  "kind": "manual",
+  "title": "Grandma's Banana Bread",
+  "ingredients": [
+    {
+      "name": "mashed banana",
+      "amount": 2,
+      "unit": "cups"
+    },
+    {
+      "name": "melted butter",
+      "amount": 0.5,
+      "unit": "cup"
+    },
+    {
+      "name": "vanilla extract",
+      "amount": 1,
+      "unit": "tsp"
+    },
+    {
+      "name": "flour",
+      "amount": 2,
+      "unit": "cups"
+    }
+  ],
+  "steps": [
+    "Preheat the oven to 350°F.",
+    "Mix the banana, butter, and vanilla.",
+    "Fold in the flour and pour into a loaf pan.",
+    "Bake for 60 minutes."
+  ]
+}

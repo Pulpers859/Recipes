@@ -1,0 +1,36 @@
+{
+  "kind": "manual",
+  "title": "Lemon Blueberry Muffins",
+  "ingredients": [
+    {
+      "name": "all-purpose flour",
+      "amount": 2,
+      "unit": "cups"
+    },
+    {
+      "name": "fresh blueberries",
+      "amount": 1,
+      "unit": "cup"
+    },
+    {
+      "name": "large eggs",
+      "amount": 2
+    },
+    {
+      "name": "granulated sugar",
+      "amount": 0.75,
+      "unit": "cup"
+    },
+    {
+      "name": "whole milk",
+      "amount": 0.5,
+      "unit": "cup"
+    }
+  ],
+  "steps": [
+    "Preheat the oven to 375°F.",
+    "Whisk the dry ingredients together.",
+    "Stir in the eggs, milk, and blueberries.",
+    "Bake for 18 minutes."
+  ]
+}

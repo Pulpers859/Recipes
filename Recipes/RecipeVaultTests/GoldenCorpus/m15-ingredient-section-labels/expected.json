@@ -1,0 +1,36 @@
+{
+  "kind": "manual",
+  "title": "Birthday Vanilla Cupcakes",
+  "ingredients": [
+    {
+      "name": "cake flour",
+      "amount": 1.5,
+      "unit": "cups"
+    },
+    {
+      "name": "sugar",
+      "amount": 1,
+      "unit": "cup"
+    },
+    {
+      "name": "large eggs",
+      "amount": 2
+    },
+    {
+      "name": "powdered sugar",
+      "amount": 2,
+      "unit": "cups"
+    },
+    {
+      "name": "unsalted butter, softened",
+      "amount": 1,
+      "unit": "stick"
+    }
+  ],
+  "steps": [
+    "Cream the butter and sugar until fluffy.",
+    "Beat in the eggs one at a time.",
+    "Fold in the flour.",
+    "Frost the cooled cupcakes."
+  ]
+}

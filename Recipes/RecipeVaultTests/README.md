@@ -6,6 +6,35 @@ Unit tests for the hand-tuned heuristics most likely to regress when tweaked:
 - `IngredientLineParserTests` — free-text ingredient line parsing and locale-tolerant number parsing
 - `JSONPayloadExtractorTests` — extracting JSON from AI responses (fences, prose, arrays)
 - `MealPlanningServiceTests` — week semantics and shopping-list aggregation
+- `BackupSnapshotTests` — safety-snapshot filenames, pruning, legacy migration
+- `GoldenCorpusTests` — scored regression gate over `GoldenCorpus/` (see below)
+
+## Golden import corpus
+
+`GoldenCorpus/` holds document-level parsing cases: each folder has an
+`input.txt` (raw recipe text; split cases delimit pages with `<<<PAGE>>>`
+lines) and an `expected.json` with hand-authored ground truth.
+`GoldenCorpusTests` runs `RecipeTextHeuristics` over every case and computes
+aggregate ingredient F1, step F1, title accuracy, amount accuracy, and
+split-boundary accuracy, failing if any drops below the committed baseline.
+The baselines are the *measured* performance of the current heuristics — some
+cases intentionally score below 1.0 to document known weaknesses (numbered and
+bulleted ingredient lists, size-qualifier prefixes, traditional-cookbook
+splitting). When you improve a heuristic, raise the affected baseline to just
+under the new measurement in the same commit.
+
+To add a real-world case: create a folder, paste the document text into
+`input.txt` (for PDFs, the extracted page text; for photos, the OCR output),
+write the ground truth into `expected.json`, then re-measure and raise the
+baselines if the averages moved.
+
+## Running on Windows (no Xcode)
+
+`python tools/build_windows_test_harness.py --run` generates a SwiftPM package
+from preprocessed copies of the pure-logic sources plus this whole test suite
+(corpus included) and runs it with the local Swift for Windows toolchain in
+about a second. Views and SwiftData persistence stay compile-unverified on
+Windows — that is what the GitHub Actions macOS workflow is for.
 
 ## Wiring
 
