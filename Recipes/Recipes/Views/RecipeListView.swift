@@ -329,6 +329,21 @@ struct RecipeListView: View {
                     .padding(.horizontal)
                     .padding(.top, 8)
 
+                if navigationState.shareInboxCount > 0 {
+                    Button {
+                        showingImportSheet = true
+                    } label: {
+                        RVStatusBanner(
+                            message: navigationState.shareInboxCount == 1
+                                ? "1 shared item is waiting to import — tap to review."
+                                : "\(navigationState.shareInboxCount) shared items are waiting to import — tap to review.",
+                            tone: .info
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal)
+                }
+
                 VStack(alignment: .leading, spacing: 16) {
                     searchPanel
                     selectionToolbar

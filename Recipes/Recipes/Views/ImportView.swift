@@ -24,6 +24,17 @@ struct ImportView: View {
     /// recipe into the library with no review sheet.
     @State private var activeImportTask: Task<Void, Never>?
     @AppStorage("parse_mode") private var parseModeSetting = "auto"
+
+    // Share-extension inbox. Dormant until the extension target ships — the
+    // App Group container doesn't exist yet, so the list stays empty.
+    @EnvironmentObject private var navigationState: AppNavigationState
+    @State private var sharedItems: [ShareInboxItem] = []
+    @State private var sharedItemPendingDiscard: ShareInboxItem?
+    /// Set while a shared PDF's batch review is open; the inbox item is
+    /// removed only when the review is accepted, so cancelling the review
+    /// can't lose the only copy of the shared document.
+    @State private var pendingBatchInboxItem: ShareInboxItem?
+    @State private var isImportingSharedItem = false
     
     private let maxPDFImportBytes = 25 * 1024 * 1024
     private let maxPhotoImportBytes = 15 * 1024 * 1024
@@ -55,6 +66,10 @@ struct ImportView: View {
                             ("AI", parser.hasAPIKey ? "Ready" : "Off")
                         ]
                     )
+
+                    if !sharedItems.isEmpty {
+                        sharedInboxSection
+                    }
 
                     importMethodPicker
 
@@ -92,6 +107,7 @@ struct ImportView: View {
                 parser.lastError = nil
                 scraper.lastError = nil
                 scraper.lastWarning = nil
+                refreshSharedInbox()
             }
             .onDisappear {
                 activeImportTask?.cancel()
@@ -140,6 +156,13 @@ struct ImportView: View {
                         return "Could not save the recipes: \(error.localizedDescription)"
                     }
                     SpotlightIndexingService.shared.indexAllRecipes(accepted)
+                    // The shared document is safely in the library now; its
+                    // inbox copy can go.
+                    if let sharedItem = pendingBatchInboxItem {
+                        ShareInboxService.removeItem(sharedItem)
+                        pendingBatchInboxItem = nil
+                        refreshSharedInbox()
+                    }
                     importedCount = accepted.count
                     showImportSummary = true
                     return nil
@@ -151,6 +174,28 @@ struct ImportView: View {
                 Button("OK") { dismiss() }
             } message: {
                 Text("Imported \(importedCount) recipe\(importedCount == 1 ? "" : "s"). Open each one in the Recipes tab to verify the content.")
+            }
+            .onChange(of: showBatchReview) { _, showing in
+                // Review closed without accepting — the shared item stays in
+                // the inbox for another attempt.
+                if !showing { pendingBatchInboxItem = nil }
+            }
+            .alert(
+                "Discard Shared Item?",
+                isPresented: Binding(
+                    get: { sharedItemPendingDiscard != nil },
+                    set: { if !$0 { sharedItemPendingDiscard = nil } }
+                ),
+                presenting: sharedItemPendingDiscard
+            ) { item in
+                Button("Discard", role: .destructive) {
+                    ShareInboxService.removeItem(item)
+                    AnalyticsService.shared.track("import_shared_discarded")
+                    refreshSharedInbox()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: { item in
+                Text("This \(item.envelope.kind.displayLabel.lowercased()) hasn't been imported. Discarding removes it permanently.")
             }
         }
     }
@@ -502,6 +547,128 @@ struct ImportView: View {
         }
     }
     
+    // MARK: - Shared inbox
+
+    private var sharedInboxSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            RVSectionTitle(
+                title: "Shared With Recipe Vault",
+                subtitle: "Saved from the share sheet. Importing runs the normal review flow — nothing joins your vault unseen."
+            )
+
+            ForEach(sharedItems) { item in
+                sharedItemRow(item)
+            }
+        }
+        .rvCard()
+    }
+
+    private func sharedItemRow(_ item: ShareInboxItem) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: item.envelope.kind.icon)
+                .foregroundStyle(Color.rvAccent)
+                .frame(width: 24)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.envelope.kind.displayLabel)
+                    .font(.subheadline.weight(.semibold))
+                Text("\(ByteCountFormatter.string(fromByteCount: Int64(item.payloadSizeBytes), countStyle: .file)) · \(item.envelope.createdAt.formatted(.relative(presentation: .named)))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Button("Import") {
+                importSharedItem(item)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .disabled(isImportingSharedItem || parser.isProcessing)
+
+            Button {
+                sharedItemPendingDiscard = item
+            } label: {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.red)
+            .disabled(isImportingSharedItem)
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func refreshSharedInbox() {
+        sharedItems = ShareInboxService.listItems()
+        navigationState.refreshShareInboxCount()
+    }
+
+    private func importSharedItem(_ item: ShareInboxItem) {
+        guard !isImportingSharedItem else { return }
+        isImportingSharedItem = true
+        parser.lastError = nil
+        scraper.lastError = nil
+        scraper.lastWarning = nil
+        let kind = item.envelope.kind
+
+        activeImportTask = Task {
+            defer { isImportingSharedItem = false }
+            do {
+                switch kind {
+                case .url:
+                    let data = try ShareInboxService.payloadData(for: item)
+                    guard let text = String(data: data, encoding: .utf8)?
+                            .trimmingCharacters(in: .whitespacesAndNewlines),
+                          !text.isEmpty
+                    else { throw ShareInboxService.ReadError.unreadablePayload }
+                    let recipe = try await scraper.scrapeRecipe(
+                        from: text,
+                        allowAI: parseModeSetting != "manual"
+                    )
+                    guard !Task.isCancelled else { return }
+                    modelContext.insert(recipe)
+                    importedRecipe = recipe
+
+                case .image:
+                    let data = try ShareInboxService.payloadData(for: item, maxBytes: maxPhotoImportBytes)
+                    let recipe = try await parser.parseRecipeFromImage(data, mode: parseMode())
+                    guard !Task.isCancelled else { return }
+                    modelContext.insert(recipe)
+                    importedRecipe = recipe
+
+                case .pdf:
+                    let data = try ShareInboxService.payloadData(for: item, maxBytes: maxPDFImportBytes)
+                    let recipes = try await parser.parseRecipes(from: data, mode: parseMode())
+                    guard !Task.isCancelled else { return }
+                    if recipes.count == 1 {
+                        modelContext.insert(recipes[0])
+                        importedRecipe = recipes.first
+                    } else {
+                        pendingBatchInboxItem = item
+                        pendingBatchRecipes = recipes
+                        showBatchReview = true
+                        AnalyticsService.shared.track("import_shared_success", metadata: [
+                            "kind": kind.rawValue, "mode": parseModeSetting
+                        ])
+                        return
+                    }
+                }
+                guard !Task.isCancelled else { return }
+                ShareInboxService.removeItem(item)
+                refreshSharedInbox()
+                AnalyticsService.shared.track("import_shared_success", metadata: [
+                    "kind": kind.rawValue, "mode": parseModeSetting
+                ])
+            } catch is CancellationError {
+                // Cancelled by the user; the item stays in the inbox.
+            } catch {
+                guard !Task.isCancelled else { return }
+                parser.lastError = error.localizedDescription
+                AnalyticsService.shared.track("import_shared_failed", metadata: ["kind": kind.rawValue])
+            }
+        }
+    }
+
     private func parseMode() -> RecipeParserService.ParseMode {
         switch parseModeSetting {
         case "ai":

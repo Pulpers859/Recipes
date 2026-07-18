@@ -8,6 +8,7 @@ Unit tests for the hand-tuned heuristics most likely to regress when tweaked:
 - `MealPlanningServiceTests` — week semantics and shopping-list aggregation
 - `BackupSnapshotTests` — safety-snapshot filenames, pruning, legacy migration
 - `GoldenCorpusTests` — scored regression gate over `GoldenCorpus/` (see below)
+- `ShareInboxTests` — share-extension inbox protocol (payload-then-envelope commit, non-destructive reads, size/count caps)
 
 ## Golden import corpus
 

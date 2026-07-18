@@ -30,6 +30,7 @@ struct RecipeVaultApp: App {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 AnalyticsService.shared.markSessionActive()
+                navigationState.refreshShareInboxCount()
             } else if phase == .background || phase == .inactive {
                 AnalyticsService.shared.markCleanExit()
                 if phase == .background {

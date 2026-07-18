@@ -55,6 +55,8 @@ VERBATIM_SOURCES = [
     "Service/JSONPayloadExtractor.swift",
     "Service/AIParsedRecipe.swift",
     "Service/RecipeTextHeuristics.swift",
+    "Service/ShareInboxEnvelope.swift",
+    "Service/ShareInboxService.swift",
 ]
 
 # Copied with preprocessing; the listed header regexes get their whole

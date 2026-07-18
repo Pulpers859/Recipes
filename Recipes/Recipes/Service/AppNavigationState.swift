@@ -12,4 +12,13 @@ final class AppNavigationState: ObservableObject {
     func clearSpotlightRequest() {
         spotlightRecipeID = nil
     }
+
+    /// Pending share-extension inbox items; drives the Recipes-tab banner.
+    /// Zero until the extension target ships (the App Group container doesn't
+    /// exist yet, so the inbox reads as empty).
+    @Published var shareInboxCount: Int = 0
+
+    func refreshShareInboxCount() {
+        shareInboxCount = ShareInboxService.itemCount()
+    }
 }
