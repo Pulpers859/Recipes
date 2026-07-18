@@ -5,6 +5,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ios-${{ github.ref }}
   cancel-in-progress: true
@@ -16,7 +19,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Show Xcode and simulator inventory
         run: |
@@ -45,9 +48,18 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             | tee xcodebuild.log | "${FORMATTER[@]}"
 
+      # xcodebuild exits 0 even when zero tests are discovered (e.g. the
+      # scheme's test action loses the test target), so demand log evidence.
+      - name: Verify tests actually ran
+        run: |
+          if ! grep -Eq '(Executed|Test run with) [1-9][0-9]* tests?' xcodebuild.log; then
+            echo '::error::xcodebuild was green but the log has no evidence that any test ran.'
+            exit 1
+          fi
+
       - name: Upload logs and results on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: test-results
           path: |
