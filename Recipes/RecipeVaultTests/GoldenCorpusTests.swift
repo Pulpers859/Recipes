@@ -56,7 +56,17 @@ final class GoldenCorpusTests: XCTestCase {
     }
 
     private static func corpusDirectory() -> URL {
-        URL(fileURLWithPath: #filePath)
+        let testFileDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        // Windows-harness layout: the generator copies the corpus right next
+        // to this file.
+        let sibling = testFileDirectory.appendingPathComponent("GoldenCorpus", isDirectory: true)
+        if FileManager.default.fileExists(atPath: sibling.path) { return sibling }
+        // Repo layout: the corpus deliberately lives OUTSIDE the
+        // file-synchronized RecipeVaultTests folder (at Recipes/GoldenCorpus).
+        // Synchronized groups copy resource files flat into the test bundle,
+        // so 24 files all named input.txt break the build with "Multiple
+        // commands produce" if the corpus sits inside the target.
+        return testFileDirectory
             .deletingLastPathComponent()
             .appendingPathComponent("GoldenCorpus", isDirectory: true)
     }

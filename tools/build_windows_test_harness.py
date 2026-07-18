@@ -236,7 +236,9 @@ def generate(out_dir: pathlib.Path) -> None:
         source = re.sub(r"@MainActor\s+", "", source)
         (tests_dir / test_file.name).write_text(source, encoding="utf-8")
 
-    corpus = TESTS / "GoldenCorpus"
+    # The corpus lives outside the synchronized test folder in the repo (see
+    # GoldenCorpusTests.corpusDirectory()); copy it next to the tests here.
+    corpus = REPO / "Recipes" / "GoldenCorpus"
     if corpus.exists():
         shutil.copytree(corpus, tests_dir / "GoldenCorpus")
 

@@ -11,7 +11,10 @@ Unit tests for the hand-tuned heuristics most likely to regress when tweaked:
 
 ## Golden import corpus
 
-`GoldenCorpus/` holds document-level parsing cases: each folder has an
+`Recipes/GoldenCorpus/` (one level up — deliberately OUTSIDE this
+file-synchronized folder, because Xcode copies synchronized-group resources
+flat into the test bundle and 24 files named `input.txt` collide) holds
+document-level parsing cases: each folder has an
 `input.txt` (raw recipe text; split cases delimit pages with `<<<PAGE>>>`
 lines) and an `expected.json` with hand-authored ground truth.
 `GoldenCorpusTests` runs `RecipeTextHeuristics` over every case and computes
