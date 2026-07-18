@@ -50,9 +50,13 @@ jobs:
 
       # xcodebuild exits 0 even when zero tests are discovered (e.g. the
       # scheme's test action loses the test target), so demand log evidence.
+      # Xcode 26 parallel testing prints per-test "Test case '...' passed on
+      # 'Clone ...'" lines and no "Executed N tests" summary; older toolchains
+      # and swift-testing print the summary forms. Accept either.
       - name: Verify tests actually ran
         run: |
-          if ! grep -Eq '(Executed|Test run with) [1-9][0-9]* tests?' xcodebuild.log; then
+          if ! grep -Eq "^Test case '.+' (passed|failed)" xcodebuild.log \
+            && ! grep -Eq '(Executed|Test run with) [1-9][0-9]* tests?' xcodebuild.log; then
             echo '::error::xcodebuild was green but the log has no evidence that any test ran.'
             exit 1
           fi
