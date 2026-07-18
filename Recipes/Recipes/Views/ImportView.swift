@@ -25,8 +25,8 @@ struct ImportView: View {
     @State private var activeImportTask: Task<Void, Never>?
     @AppStorage("parse_mode") private var parseModeSetting = "auto"
 
-    // Share-extension inbox. Dormant until the extension target ships — the
-    // App Group container doesn't exist yet, so the list stays empty.
+    // Share-extension inbox. The extension stores bytes only; this screen owns
+    // parsing, review, persistence, and explicit discard.
     @EnvironmentObject private var navigationState: AppNavigationState
     @State private var sharedItems: [ShareInboxItem] = []
     @State private var sharedItemPendingDiscard: ShareInboxItem?

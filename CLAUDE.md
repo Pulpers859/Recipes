@@ -18,7 +18,7 @@ Recipe Vault is a small SwiftUI + SwiftData iOS app. Optimize for recipe correct
 - `Service/URLRecipeScraperService.swift`: JSON-LD scrape, AI fallback, URL safety rules
 - `Service/RecipeExportService.swift`, `PantryBackupService.swift`, `RecipeConflictResolverService.swift`: backup/import/export/dedupe safety
 - `Service/MealPlanningService.swift`: week-scoped plan lookup, planned-servings aggregation, meal-plan entry cleanup on recipe delete
-- `Service/ShareInboxEnvelope.swift`, `ShareInboxService.swift`: share-extension inbox (dormant until the extension target ships — see `Recipes/ShareExtensionStaging/README.md`)
+- `Service/ShareInboxEnvelope.swift`, `ShareInboxService.swift`, `RecipeVaultShare/`: App Group share-extension inbox and its app-side review flow
 - `Service/IngredientLineParser.swift`: shared free-text ingredient parsing used by both URL and PDF fallbacks
 - `Service/AppDataStack.swift`, `AnalyticsService.swift`, `KeychainService.swift`, `AppConfig.swift`: persistence, crash clues, secrets, app config
 - `Recipes/RecipeVaultTests/`: unit tests for parsing heuristics; keep this outside `Recipes/Recipes` unless a dedicated unit-test target owns it

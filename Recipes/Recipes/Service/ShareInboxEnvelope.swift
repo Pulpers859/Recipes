@@ -6,8 +6,8 @@ import Foundation
 /// existence is the commit marker: a payload with no envelope is a failed or
 /// in-flight write and must be ignored by readers. This file will be compiled
 /// into BOTH the app and the share extension target (see
-/// `Recipes/ShareExtensionStaging/README.md`) — keep it Foundation-only and
-/// free of app dependencies.
+/// the `RecipeVaultShare` target — keep it Foundation-only and free of app
+/// dependencies.
 nonisolated enum ShareInbox {
     static let appGroupIdentifier = "group.Patrick-App.Recipes"
     static let inboxDirectoryName = "ImportInbox"
@@ -72,9 +72,9 @@ nonisolated enum ShareInbox {
         }
     }
 
-    /// The App Group inbox, or nil when the entitlement isn't present — which
-    /// is the case until the share-extension target ships. Callers must treat
-    /// nil as "feature dormant", not as an error.
+    /// The App Group inbox, or nil when the entitlement or shared container is
+    /// unavailable. Callers treat nil as an unavailable feature, not a reason
+    /// to create a private fallback directory the extension cannot access.
     static func inboxDirectory(fileManager: FileManager = .default) -> URL? {
         #if canImport(Darwin)
         return fileManager

@@ -32,6 +32,9 @@ jobs:
             sudo xcodebuild -downloadPlatform iOS
           fi
 
+      - name: Validate share-extension wiring
+        run: python3 tools/validate_share_extension.py
+
       - name: Build and test
         run: |
           set -o pipefail
