@@ -41,14 +41,14 @@ final class ShareViewController: UIViewController {
         if let provider = providers.first(where: {
             $0.hasItemConformingToTypeIdentifier(UTType.pdf.identifier)
         }) {
-            loadData(from: provider, type: .pdf) { [weak self] data in
-                self?.store(kind: .pdf, payload: data, in: inbox)
+            loadData(from: provider, type: .pdf) { [weak self] result in
+                self?.store(kind: .pdf, payload: result, in: inbox)
             }
         } else if let provider = providers.first(where: {
             $0.hasItemConformingToTypeIdentifier(UTType.image.identifier)
         }) {
-            loadData(from: provider, type: .image) { [weak self] data in
-                self?.store(kind: .image, payload: data, in: inbox)
+            loadData(from: provider, type: .image) { [weak self] result in
+                self?.store(kind: .image, payload: result, in: inbox)
             }
         } else if let provider = providers.first(where: {
             $0.hasItemConformingToTypeIdentifier(UTType.url.identifier)
@@ -63,26 +63,57 @@ final class ShareViewController: UIViewController {
         }
     }
 
+    private enum LoadError: LocalizedError {
+        case unreadable
+
+        var errorDescription: String? { "That item couldn't be read." }
+    }
+
     private func loadData(
         from provider: NSItemProvider,
         type: UTType,
-        completion: @escaping @MainActor (Data?) -> Void
+        completion: @escaping @MainActor (Result<Data, Error>) -> Void
     ) {
-        provider.loadDataRepresentation(forTypeIdentifier: type.identifier) { data, _ in
-            Task { @MainActor in completion(data) }
+        // The file representation stays on disk, so the size cap is enforced
+        // before any bytes enter the extension's tight memory budget. The temp
+        // file is only valid inside this handler, so read it here.
+        provider.loadFileRepresentation(forTypeIdentifier: type.identifier) { fileURL, _ in
+            let result: Result<Data, Error>
+            if let fileURL,
+               let size = ((try? FileManager.default.attributesOfItem(atPath: fileURL.path))?[.size] as? NSNumber)?.intValue {
+                if size > ShareInbox.maxPayloadBytes {
+                    result = .failure(ShareInbox.WriteError.payloadTooLarge)
+                } else if let data = try? Data(contentsOf: fileURL) {
+                    result = .success(data)
+                } else {
+                    result = .failure(LoadError.unreadable)
+                }
+            } else {
+                result = .failure(LoadError.unreadable)
+            }
+            Task { @MainActor in completion(result) }
         }
     }
 
     private func loadURL(from provider: NSItemProvider, in inbox: URL) {
         provider.loadItem(forTypeIdentifier: UTType.url.identifier) { [weak self] item, _ in
-            let urlString = (item as? URL)?.absoluteString
+            // Hosts deliver public.url as a URL, as the URL string's UTF-8
+            // bytes, or as a plain string, depending on the app.
+            let urlString: String?
+            switch item {
+            case let url as URL: urlString = url.absoluteString
+            case let data as Data: urlString = String(data: data, encoding: .utf8)
+            case let string as String: urlString = string
+            default: urlString = nil
+            }
             Task { @MainActor in
                 guard let self else { return }
-                guard let urlString, let url = URL(string: urlString), Self.isWebURL(url) else {
+                let trimmed = urlString?.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard let trimmed, let url = URL(string: trimmed), Self.isWebURL(url) else {
                     self.finish(message: "Only web links can be shared to Recipe Vault.", succeeded: false)
                     return
                 }
-                self.store(kind: .url, payload: Data(url.absoluteString.utf8), in: inbox)
+                self.store(kind: .url, payload: .success(Data(url.absoluteString.utf8)), in: inbox)
             }
         }
     }
@@ -100,7 +131,7 @@ final class ShareViewController: UIViewController {
                     )
                     return
                 }
-                self.store(kind: .url, payload: Data(url.absoluteString.utf8), in: inbox)
+                self.store(kind: .url, payload: .success(Data(url.absoluteString.utf8)), in: inbox)
             }
         }
     }
@@ -109,14 +140,21 @@ final class ShareViewController: UIViewController {
         ["http", "https"].contains(url.scheme?.lowercased() ?? "") && url.host != nil
     }
 
-    private func store(kind: ShareInbox.Kind, payload: Data?, in inbox: URL) {
-        guard let payload, !payload.isEmpty else {
-            finish(message: "That item couldn't be read.", succeeded: false)
+    private func store(kind: ShareInbox.Kind, payload: Result<Data, Error>, in inbox: URL) {
+        let data: Data
+        switch payload {
+        case .success(let loaded) where !loaded.isEmpty:
+            data = loaded
+        case .success:
+            finish(message: LoadError.unreadable.localizedDescription, succeeded: false)
+            return
+        case .failure(let error):
+            finish(message: error.localizedDescription, succeeded: false)
             return
         }
 
         do {
-            try ShareInbox.writeItem(kind: kind, payload: payload, in: inbox)
+            try ShareInbox.writeItem(kind: kind, payload: data, in: inbox)
             finish(message: "Saved. Open Recipe Vault and go to Import to review it.", succeeded: true)
         } catch {
             finish(message: error.localizedDescription, succeeded: false)
