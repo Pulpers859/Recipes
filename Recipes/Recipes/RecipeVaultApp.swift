@@ -32,6 +32,11 @@ struct RecipeVaultApp: App {
                 AnalyticsService.shared.markSessionActive()
             } else if phase == .background || phase == .inactive {
                 AnalyticsService.shared.markCleanExit()
+                if phase == .background {
+                    // Recovery point for ordinary edits/imports — destructive
+                    // actions write their own snapshot before acting.
+                    RecipeAutoSnapshotService.snapshotIfChanged(modelContext: AppDataStack.sharedContainer.mainContext)
+                }
             }
         }
     }

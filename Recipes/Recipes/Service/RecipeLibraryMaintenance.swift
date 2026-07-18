@@ -56,9 +56,12 @@ enum RecipeLibraryMaintenance {
     static func importBackup(
         data: Data,
         existingRecipes: [Recipe],
-        modelContext: ModelContext
+        modelContext: ModelContext,
+        enforceSizeLimit: Bool = true
     ) throws -> MaintenanceOutcome {
-        guard data.count <= maxBackupImportBytes else {
+        // The cap guards against arbitrary external files; snapshots this app
+        // wrote itself may legitimately exceed it when photos are embedded.
+        guard !enforceSizeLimit || data.count <= maxBackupImportBytes else {
             throw MaintenanceError.backupTooLarge
         }
 
@@ -194,6 +197,33 @@ enum RecipeLibraryMaintenance {
         let isError: Bool
     }
 
+    // MARK: - Snapshot Restore
+
+    /// Restores a safety snapshot by additively merging it into the current
+    /// library — the same tolerant v1–v4 import used for external backup
+    /// files, minus the size cap. Never throws: returns the outcome to show.
+    @MainActor
+    static func restoreSnapshot(
+        at url: URL,
+        existingRecipes: [Recipe],
+        modelContext: ModelContext
+    ) -> MaintenanceOutcome {
+        do {
+            let data = try Data(contentsOf: url)
+            let outcome = try importBackup(
+                data: data,
+                existingRecipes: existingRecipes,
+                modelContext: modelContext,
+                enforceSizeLimit: false
+            )
+            AnalyticsService.shared.track("snapshot_restore", metadata: ["error": outcome.isError ? "1" : "0"])
+            return outcome
+        } catch {
+            AnalyticsService.shared.track("snapshot_restore_failed")
+            return MaintenanceOutcome(message: "Could not restore the snapshot: \(error.localizedDescription)", isError: true)
+        }
+    }
+
     // MARK: - Delete All
 
     /// Snapshot of the whole library (recipes plus pantry, shopping, and meal
@@ -264,7 +294,7 @@ enum RecipeLibraryMaintenance {
         SpotlightIndexingService.shared.removeAllRecipes()
 
         AnalyticsService.shared.track("recipes_all_deleted", metadata: ["count": "\(count)"])
-        return MaintenanceOutcome(message: "Deleted \(count) recipes. A safety backup was saved on this device.", isError: false)
+        return MaintenanceOutcome(message: "Deleted \(count) recipes. A safety snapshot was saved first — restore it anytime from Settings → Safety Snapshots.", isError: false)
     }
 
     // MARK: - Duplicate Resolution
@@ -312,7 +342,7 @@ enum RecipeLibraryMaintenance {
         if result.deletedDuplicates == 0 {
             return MaintenanceOutcome(message: "No duplicate recipe conflicts found.", isError: false)
         } else {
-            return MaintenanceOutcome(message: "Resolved \(result.mergedRecipes) conflict group(s), removed \(result.deletedDuplicates) duplicate recipes. A safety backup was saved first.", isError: false)
+            return MaintenanceOutcome(message: "Resolved \(result.mergedRecipes) conflict group(s), removed \(result.deletedDuplicates) duplicate recipes. A safety snapshot was saved first — see Settings → Safety Snapshots.", isError: false)
         }
     }
 }

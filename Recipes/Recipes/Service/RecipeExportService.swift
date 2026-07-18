@@ -31,7 +31,45 @@ class RecipeExportService {
     // MARK: - Automatic Safety Backup
 
     private nonisolated static let backupDirectoryName = "RecipeVault/Backups"
-    private nonisolated static let automaticBackupFilename = "RecipeVault-Recipes-Latest.json"
+    /// Pre-snapshot builds wrote one rolling file under this name. It is
+    /// migrated into the timestamped snapshot scheme on first contact so an
+    /// upgraded install keeps its existing recovery point.
+    private nonisolated static let legacyBackupFilename = "RecipeVault-Recipes-Latest.json"
+    private nonisolated static let snapshotFilenamePrefix = "RecipeVault-Snapshot-"
+
+    /// How many snapshots survive pruning. Every destructive action and every
+    /// changed-library backgrounding writes one, so this is a rolling window
+    /// of recent recovery points — not a single overwritten file.
+    nonisolated static let maxSnapshotCount = 6
+
+    /// Why a snapshot was written; encoded in the filename and shown in the
+    /// Settings restore list. `nonisolated` because instances are built and
+    /// read inside the detached backup task (the project's default actor
+    /// isolation is MainActor).
+    nonisolated enum SnapshotKind: String, Sendable {
+        /// Written immediately before a destructive action (delete, merge).
+        case safety
+        /// Written when the app leaves the foreground with changed data.
+        case auto
+
+        var displayLabel: String {
+            switch self {
+            case .safety: return "Before destructive action"
+            case .auto: return "Automatic"
+            }
+        }
+    }
+
+    /// One restorable snapshot file in the backup directory. `nonisolated`
+    /// for the same reason as `SnapshotKind`: constructed off the main actor.
+    nonisolated struct BackupSnapshot: Identifiable, Sendable {
+        let url: URL
+        let date: Date
+        let kind: SnapshotKind
+        let sizeBytes: Int
+
+        var id: URL { url }
+    }
 
     /// Immutable snapshot of everything the backup persists. Captured on the
     /// main actor (where the SwiftData models live) so the expensive encode
@@ -62,29 +100,106 @@ class RecipeExportService {
         )
     }
 
-    /// Stage 2: encode and write the safety backup off the main thread, so a
-    /// photo-heavy library doesn't freeze the UI ahead of every delete. The
-    /// file is restorable via "Import from JSON Backup". Callers must await
-    /// the result BEFORE deleting anything — a failed backup aborts the
-    /// delete, exactly as before.
+    /// Stage 2: encode and write a safety snapshot off the main thread, so a
+    /// photo-heavy library doesn't freeze the UI ahead of every delete.
+    /// Snapshots are timestamped, kept `maxSnapshotCount` deep, and
+    /// restorable from Settings → Safety Snapshots (or the Files app).
+    /// Callers must await the result BEFORE deleting anything — a failed
+    /// backup aborts the delete, exactly as before.
     @discardableResult
-    nonisolated static func writeAutomaticBackup(payload: BackupPayload) async throws -> URL {
+    nonisolated static func writeAutomaticBackup(
+        payload: BackupPayload,
+        kind: SnapshotKind = .safety
+    ) async throws -> URL {
         try await Task.detached(priority: .userInitiated) {
-            // Compact encoding: this is a rolling machine-read safety file,
-            // and pretty-printing base64 photo blobs doubles nothing but time.
+            // Compact encoding: this is a machine-read safety file, and
+            // pretty-printing base64 photo blobs doubles nothing but time.
             let data = try encode(payload, outputFormatting: [.sortedKeys])
-            let documentsDirectory = try FileManager.default.url(
-                for: .documentDirectory,
-                in: .userDomainMask,
-                appropriateFor: nil,
-                create: true
-            )
-            let backupDirectory = documentsDirectory.appendingPathComponent(backupDirectoryName, isDirectory: true)
-            try FileManager.default.createDirectory(at: backupDirectory, withIntermediateDirectories: true)
-            let backupURL = backupDirectory.appendingPathComponent(automaticBackupFilename)
+            let directory = try ensureBackupDirectory()
+            migrateLegacyBackupIfNeeded(in: directory)
+            let backupURL = directory.appendingPathComponent(snapshotFilename(for: Date(), kind: kind))
             try data.write(to: backupURL, options: .atomic)
+            pruneSnapshots(in: directory)
             return backupURL
         }.value
+    }
+
+    /// All restorable snapshots on this device, newest first.
+    nonisolated static func listBackupSnapshots() -> [BackupSnapshot] {
+        guard let directory = try? ensureBackupDirectory() else { return [] }
+        migrateLegacyBackupIfNeeded(in: directory)
+        let contents = (try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        )) ?? []
+        return contents.compactMap(snapshot(fromFileURL:)).sorted { $0.date > $1.date }
+    }
+
+    private nonisolated static func ensureBackupDirectory() throws -> URL {
+        let documentsDirectory = try FileManager.default.url(
+            for: .documentDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        let directory = documentsDirectory.appendingPathComponent(backupDirectoryName, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+
+    /// Filename dates are fixed-locale UTC so parsing them back never depends
+    /// on the device's locale, calendar, or DST state.
+    nonisolated static func makeSnapshotDateFormatter() -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.dateFormat = "yyyyMMdd-HHmmss-SSS"
+        return formatter
+    }
+
+    nonisolated static func snapshotFilename(for date: Date, kind: SnapshotKind) -> String {
+        "\(snapshotFilenamePrefix)\(makeSnapshotDateFormatter().string(from: date))-\(kind.rawValue).json"
+    }
+
+    /// Parses "RecipeVault-Snapshot-20260717-153045-123-safety.json" back into
+    /// a snapshot. Files that don't match the pattern (user-renamed, foreign)
+    /// are ignored rather than guessed at.
+    nonisolated static func snapshot(fromFileURL url: URL) -> BackupSnapshot? {
+        let name = url.lastPathComponent
+        guard name.hasPrefix(snapshotFilenamePrefix), name.hasSuffix(".json") else { return nil }
+        let core = name.dropFirst(snapshotFilenamePrefix.count).dropLast(".json".count)
+        guard let lastDash = core.lastIndex(of: "-") else { return nil }
+        let kindPart = String(core[core.index(after: lastDash)...])
+        let datePart = String(core[..<lastDash])
+        guard let kind = SnapshotKind(rawValue: kindPart),
+              let date = makeSnapshotDateFormatter().date(from: datePart) else { return nil }
+        let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int ?? 0
+        return BackupSnapshot(url: url, date: date, kind: kind, sizeBytes: size)
+    }
+
+    /// Renames the pre-snapshot rolling file into the timestamped scheme,
+    /// dated by its modification time, so it shows up in the restore list and
+    /// participates in pruning. No-op when the legacy file is absent.
+    nonisolated static func migrateLegacyBackupIfNeeded(in directory: URL) {
+        let fm = FileManager.default
+        let legacyURL = directory.appendingPathComponent(legacyBackupFilename)
+        guard fm.fileExists(atPath: legacyURL.path) else { return }
+        let modified = (try? fm.attributesOfItem(atPath: legacyURL.path))?[.modificationDate] as? Date ?? Date()
+        let destination = directory.appendingPathComponent(snapshotFilename(for: modified, kind: .safety))
+        try? fm.moveItem(at: legacyURL, to: destination)
+    }
+
+    /// Deletes the oldest snapshots beyond `maxSnapshotCount`. Failures are
+    /// swallowed: failing to prune must never fail the backup just written.
+    nonisolated static func pruneSnapshots(in directory: URL) {
+        let contents = (try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        )) ?? []
+        let snapshots = contents.compactMap(snapshot(fromFileURL:)).sorted { $0.date > $1.date }
+        for stale in snapshots.dropFirst(maxSnapshotCount) {
+            try? FileManager.default.removeItem(at: stale.url)
+        }
     }
 
     private nonisolated static func encode(_ payload: BackupPayload, outputFormatting: JSONEncoder.OutputFormatting) throws -> Data {

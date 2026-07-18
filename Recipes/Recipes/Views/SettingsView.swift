@@ -30,6 +30,9 @@ struct SettingsView: View {
     /// be guessed by string-sniffing (a failed delete once rendered green).
     @State private var maintenanceMessage: (text: String, isError: Bool)?
     @State private var archivedStores: [ArchivedStore] = []
+    @State private var backupSnapshots: [RecipeExportService.BackupSnapshot] = []
+    @State private var snapshotPendingRestore: RecipeExportService.BackupSnapshot?
+    @State private var snapshotMessage: (text: String, isError: Bool)?
 
     var body: some View {
         NavigationStack {
@@ -49,6 +52,7 @@ struct SettingsView: View {
                     cookingCard
                     dataCard
                     maintenanceCard
+                    snapshotsCard
                     analyticsCard
                     recoveryCard
                     libraryCard
@@ -87,6 +91,7 @@ struct SettingsView: View {
                 // Directory listing + file attribute reads don't belong in
                 // body; load once and refresh when an export changes things.
                 archivedStores = Self.listArchivedStores()
+                backupSnapshots = RecipeExportService.listBackupSnapshots()
             }
             // Status banners fade after a bit instead of sticking around
             // forever ("Exported 42 recipes" three days later reads as stale
@@ -103,6 +108,9 @@ struct SettingsView: View {
             .onChange(of: maintenanceMessage?.text) { _, newValue in
                 scheduleBannerClear(newValue, isError: maintenanceMessage?.isError ?? false) { if maintenanceMessage?.text == newValue { withAnimation { maintenanceMessage = nil } } }
             }
+            .onChange(of: snapshotMessage?.text) { _, newValue in
+                scheduleBannerClear(newValue, isError: snapshotMessage?.isError ?? false) { if snapshotMessage?.text == newValue { withAnimation { snapshotMessage = nil } } }
+            }
             .alert("Delete All Recipes?", isPresented: $showDeleteAllConfirm) {
                 Button("Delete All", role: .destructive) { Task { await deleteAllRecipes() } }
                 Button("Cancel", role: .cancel) { }
@@ -114,6 +122,19 @@ struct SettingsView: View {
                 Button("Cancel", role: .cancel) { }
             } message: {
                 Text("Recipes with the same title and ingredients are merged, and the duplicates are permanently deleted. A safety backup is saved on this device first.")
+            }
+            .alert(
+                "Restore Snapshot?",
+                isPresented: Binding(
+                    get: { snapshotPendingRestore != nil },
+                    set: { if !$0 { snapshotPendingRestore = nil } }
+                ),
+                presenting: snapshotPendingRestore
+            ) { snapshot in
+                Button("Restore") { restoreSnapshot(snapshot) }
+                Button("Cancel", role: .cancel) { }
+            } message: { snapshot in
+                Text("Recipes, pantry, shopping list, and meal plans from \(snapshot.date.formatted(date: .abbreviated, time: .shortened)) will be merged into your library. Existing records are kept; duplicates are skipped.")
             }
         }
     }
@@ -278,6 +299,65 @@ struct SettingsView: View {
             .disabled(recipes.isEmpty)
         }
         .rvCard()
+    }
+
+    private var snapshotsCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            RVSectionTitle(
+                title: "Safety Snapshots",
+                subtitle: "Recovery points saved on this device before destructive actions and when you leave the app after changes."
+            )
+
+            if backupSnapshots.isEmpty {
+                HStack(spacing: 10) {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .foregroundStyle(Color.rvTaupe)
+                    Text("No snapshots yet. One is saved before every delete or duplicate cleanup, and when you close the app after making changes.")
+                        .font(.subheadline)
+                        .foregroundStyle(Color.rvSubtleText)
+                }
+            } else {
+                ForEach(backupSnapshots) { snapshot in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(snapshot.date.formatted(date: .abbreviated, time: .shortened))
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(Color.rvInk)
+                            Text("\(snapshot.kind.displayLabel) · \(ByteCountFormatter.string(fromByteCount: Int64(snapshot.sizeBytes), countStyle: .file))")
+                                .font(.caption)
+                                .foregroundStyle(Color.rvSubtleText)
+                        }
+                        Spacer()
+                        Button("Restore") {
+                            snapshotPendingRestore = snapshot
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Color.rvAccent)
+                        .controlSize(.small)
+                    }
+                }
+
+                RVStatusBanner(
+                    message: "Restoring merges a snapshot into your current library. Nothing is deleted or overwritten — records you already have are skipped.",
+                    tone: .info
+                )
+            }
+
+            if let message = snapshotMessage {
+                RVStatusBanner(message: message.text, tone: message.isError ? .danger : .success)
+            }
+        }
+        .rvCard()
+    }
+
+    private func restoreSnapshot(_ snapshot: RecipeExportService.BackupSnapshot) {
+        let outcome = RecipeLibraryMaintenance.restoreSnapshot(
+            at: snapshot.url,
+            existingRecipes: recipes,
+            modelContext: modelContext
+        )
+        snapshotMessage = (outcome.message, outcome.isError)
+        backupSnapshots = RecipeExportService.listBackupSnapshots()
     }
 
     private var analyticsCard: some View {
@@ -672,6 +752,7 @@ struct SettingsView: View {
         if let outcome = await RecipeLibraryMaintenance.deleteAllRecipes(recipes, modelContext: modelContext) {
             maintenanceMessage = (outcome.message, outcome.isError)
         }
+        backupSnapshots = RecipeExportService.listBackupSnapshots()
     }
 
     private func resolveConflicts() async {
@@ -680,6 +761,7 @@ struct SettingsView: View {
         defer { isWritingBackup = false }
         let outcome = await RecipeLibraryMaintenance.resolveConflicts(recipes, modelContext: modelContext)
         maintenanceMessage = (outcome.message, outcome.isError)
+        backupSnapshots = RecipeExportService.listBackupSnapshots()
     }
 
 }
