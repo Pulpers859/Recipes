@@ -5,6 +5,17 @@ import Combine
 /// 1. Looking for JSON-LD structured data (schema.org/Recipe) — most recipe sites use this
 /// 2. Falling back to sending raw page text to Claude API for extraction
 class URLRecipeScraperService: ObservableObject {
+    enum ExtractionMode: Equatable {
+        case automatic
+        case aiOnly
+        case localOnly
+    }
+
+    struct StructuredRecipeResult {
+        let recipe: Recipe
+        let imageURLStrings: [String]
+    }
+
     @Published var isLoading = false
     @Published var statusMessage = ""
     @Published var lastError: String?
@@ -31,11 +42,12 @@ class URLRecipeScraperService: ObservableObject {
     // MARK: - Public API
     
     @MainActor
-    func scrapeRecipe(from urlString: String, allowAI: Bool = true) async throws -> Recipe {
+    func scrapeRecipe(from urlString: String, mode: ExtractionMode = .automatic) async throws -> Recipe {
         let url = try validatedWebURL(from: urlString)
         
         isLoading = true
         lastError = nil
+        lastWarning = nil
         defer { isLoading = false }
         
         // Fetch page HTML. The redirect guard re-checks each hop's host so a
@@ -87,15 +99,22 @@ class URLRecipeScraperService: ObservableObject {
             throw ScraperError.decodeFailed
         }
         
-        // Strategy 1: Try JSON-LD extraction (fast, accurate, no API needed)
-        statusMessage = "Looking for structured recipe data..."
-        if let recipe = try? extractJSONLD(from: html, sourceURL: url.absoluteString) {
-            statusMessage = "Found structured recipe data!"
-            return recipe
+        // Strategy 1: Try JSON-LD extraction (fast, accurate, no API needed).
+        // AI Only deliberately skips this so the setting means what it says.
+        if mode != .aiOnly {
+            statusMessage = "Looking for structured recipe data..."
+            if let structured = try? extractJSONLD(from: html, sourceURL: url.absoluteString) {
+                statusMessage = "Found structured recipe data!"
+                await attachWebsitePhoto(to: structured)
+                return structured.recipe
+            }
         }
         
         // Strategy 2: Send cleaned text to Claude API
-        if allowAI && !apiKey.isEmpty {
+        if mode == .aiOnly && apiKey.isEmpty {
+            throw ScraperError.apiError("AI Only mode requires a configured API key")
+        }
+        if mode != .localOnly && !apiKey.isEmpty {
             statusMessage = "No structured data found. Sending to Claude for extraction..."
             let cleanedText = stripHTML(html)
             if cleanedText.count > aiCharacterBudget {
@@ -107,6 +126,7 @@ class URLRecipeScraperService: ObservableObject {
         
         // Strategy 3: Basic fallback — just create a recipe shell with the raw text
         statusMessage = "Creating recipe from page text..."
+        lastWarning = "No usable structured recipe data was found. This is a basic local text import, so review every field carefully. No API credits were used."
         let cleanedText = stripHTML(html)
         return basicExtract(text: cleanedText, sourceURL: url.absoluteString)
     }
@@ -130,7 +150,7 @@ class URLRecipeScraperService: ObservableObject {
         return data
     }
 
-    private func extractJSONLD(from html: String, sourceURL: String) throws -> Recipe {
+    private func extractJSONLD(from html: String, sourceURL: String) throws -> StructuredRecipeResult {
         // Find all <script type="application/ld+json"> blocks
         let pattern = #"<script[^>]*type\s*=\s*["']application/ld\+json["'][^>]*>([\s\S]*?)</script>"#
         let regex = try NSRegularExpression(pattern: pattern, options: .caseInsensitive)
@@ -173,7 +193,7 @@ class URLRecipeScraperService: ObservableObject {
         throw ScraperError.noStructuredData
     }
     
-    private func parseRecipeSchema(_ data: Data, sourceURL: String) throws -> Recipe {
+    func parseRecipeSchema(_ data: Data, sourceURL: String) throws -> StructuredRecipeResult {
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw ScraperError.parseError
         }
@@ -222,7 +242,13 @@ class URLRecipeScraperService: ObservableObject {
         
         // Parse times (ISO 8601 duration → minutes)
         let prepTime = parseDuration(json["prepTime"] as? String)
-        let cookTime = parseDuration(json["cookTime"] as? String)
+        let explicitCookTime = parseDuration(json["cookTime"] as? String)
+        let totalTime = parseDuration(json["totalTime"] as? String)
+        let cookTime = RecipeSchemaNormalizer.resolvedCookTime(
+            prepTime: prepTime,
+            cookTime: explicitCookTime,
+            totalTime: totalTime
+        )
         
         // Parse ingredients. schema.org allows an array of strings, but real
         // pages also emit a single string, mixed arrays containing nulls, or
@@ -281,40 +307,15 @@ class URLRecipeScraperService: ObservableObject {
             throw ScraperError.parseError
         }
 
-        // Parse category. WP Recipe Maker and friends emit ["Dinner"] rather
-        // than "Dinner".
-        let categoryStr: String = {
-            if let s = json["recipeCategory"] as? String { return s.lowercased() }
-            if let arr = json["recipeCategory"] as? [Any], let first = arr.first as? String {
-                return first.lowercased()
-            }
-            return ""
-        }()
-        let category = RecipeCategory(rawValue: categoryStr) ?? guessCategory(categoryStr)
-
-        // Parse cuisine
-        let cuisine = cleanHTMLEntities(
-            (json["recipeCuisine"] as? String)
-                ?? (json["recipeCuisine"] as? [Any])?.compactMap { $0 as? String }.first
-                ?? ""
-        ).trimmingCharacters(in: .whitespacesAndNewlines)
-
-        // Parse keywords/tags
-        let tags: [String] = {
-            if let keywords = json["keywords"] as? String {
-                return keywords.split(separator: ",")
-                    .map { cleanHTMLEntities(String($0)).trimmingCharacters(in: .whitespaces) }
-                    .filter { !$0.isEmpty }
-            }
-            if let keywords = json["keywords"] as? [Any] {
-                return keywords.compactMap { $0 as? String }
-                    .map { cleanHTMLEntities($0).trimmingCharacters(in: .whitespaces) }
-                    .filter { !$0.isEmpty }
-            }
-            return []
-        }()
+        let category = RecipeSchemaNormalizer.category(from: schemaStrings(json["recipeCategory"]))
+        let cuisine = RecipeSchemaNormalizer.cuisine(
+            from: schemaStrings(json["recipeCuisine"]).map(cleanHTMLEntities)
+        )
+        let tags = RecipeSchemaNormalizer.tags(
+            from: schemaStrings(json["keywords"]).map(cleanHTMLEntities)
+        )
         
-        return Recipe(
+        let recipe = Recipe(
             title: title,
             summary: cleanHTMLEntities(summary),
             ingredients: ingredients,
@@ -329,6 +330,67 @@ class URLRecipeScraperService: ObservableObject {
             sourceURL: sourceURL,
             sourceType: .url
         )
+        return StructuredRecipeResult(
+            recipe: recipe,
+            imageURLStrings: RecipeSchemaNormalizer.imageURLStrings(from: json["image"])
+        )
+    }
+
+    private func schemaStrings(_ value: Any?) -> [String] {
+        if let string = value as? String { return [string] }
+        if let values = value as? [Any] { return values.compactMap { $0 as? String } }
+        return []
+    }
+
+    @MainActor
+    private func attachWebsitePhoto(to structured: StructuredRecipeResult) async {
+        guard structured.recipe.photoData.isEmpty else { return }
+        let candidates = structured.imageURLStrings.prefix(3)
+        guard !candidates.isEmpty else { return }
+
+        statusMessage = "Downloading recipe photo..."
+        for candidate in candidates {
+            do {
+                let data = try await downloadWebsiteImage(from: candidate)
+                guard let normalized = ImageDataNormalizer.normalizedJPEGData(from: data) else {
+                    continue
+                }
+                structured.recipe.photoData = [normalized]
+                return
+            } catch {
+                continue
+            }
+        }
+
+        appendWarning("The recipe imported, but its website photo could not be downloaded safely.")
+    }
+
+    @MainActor
+    private func downloadWebsiteImage(from urlString: String) async throws -> Data {
+        let url = try validatedWebURL(from: urlString)
+        let (bytes, response) = try await urlSession.bytes(from: url, delegate: redirectGuard)
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode),
+              httpResponse.mimeType?.lowercased().hasPrefix("image/") == true
+        else { throw ScraperError.fetchFailed }
+
+        let maxImageBytes = 15 * 1024 * 1024
+        if httpResponse.expectedContentLength > Int64(maxImageBytes) {
+            throw ScraperError.pageTooLarge
+        }
+        return try await Self.collect(
+            bytes,
+            reserving: min(Int(max(httpResponse.expectedContentLength, 0)), maxImageBytes),
+            cap: maxImageBytes
+        )
+    }
+
+    private func appendWarning(_ message: String) {
+        if let existing = lastWarning, !existing.isEmpty {
+            lastWarning = existing + " " + message
+        } else {
+            lastWarning = message
+        }
     }
     
     /// Recursively flattens schema.org recipeInstructions values into plain
@@ -479,7 +541,7 @@ class URLRecipeScraperService: ObservableObject {
             title: lines.first ?? "Web Recipe",
             summary: "Imported from \(sourceURL) — edit to refine",
             sourceURL: sourceURL,
-            sourceType: .url,
+            sourceType: .webFallback,
             notes: String(text.prefix(3000))
         )
     }

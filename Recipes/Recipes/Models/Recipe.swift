@@ -285,7 +285,7 @@ enum AmountFormatter {
 }
 
 enum SourceType: String, Codable {
-    case manual, pdf, image, url, aiParsed
+    case manual, pdf, image, url, webFallback, aiParsed
     
     var displayName: String {
         switch self {
@@ -293,6 +293,7 @@ enum SourceType: String, Codable {
         case .pdf: return "PDF Import"
         case .image: return "Photo Import"
         case .url: return "Web Import"
+        case .webFallback: return "Basic Web Import"
         case .aiParsed: return "AI Parsed"
         }
     }

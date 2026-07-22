@@ -10,6 +10,20 @@ final class IngredientLineParserTests: XCTestCase {
         XCTAssertEqual(ing.name, "all-purpose flour")
     }
 
+    func testCupAbbreviationWithPeriod() {
+        let ingredient = IngredientLineParser.parse("1/2 c. diced celery")
+        XCTAssertEqual(ingredient.amount, 0.5, accuracy: 0.001)
+        XCTAssertEqual(ingredient.unit, "cup")
+        XCTAssertEqual(ingredient.name, "diced celery")
+    }
+
+    func testCupAbbreviationDoesNotEatIngredientName() {
+        let ingredient = IngredientLineParser.parse("2 carrots")
+        XCTAssertEqual(ingredient.amount, 2, accuracy: 0.001)
+        XCTAssertEqual(ingredient.unit, "")
+        XCTAssertEqual(ingredient.name, "carrots")
+    }
+
     func testMixedNumberFraction() {
         let ing = IngredientLineParser.parse("1 1/2 lbs chicken breast")
         XCTAssertEqual(ing.amount, 1.5, accuracy: 0.001)

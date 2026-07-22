@@ -55,7 +55,7 @@ enum IngredientLineParser {
         // "1 400g can" keep the 400g in the name rather than summing amounts.
         // The \b after the unit prevents short units from eating the start of
         // ingredient names ("2 garlic" must not parse as unit "g" + "arlic").
-        let pattern = "^(\(numberToken)(?:\\s*-\\s*\(numberToken))?)?\\s*(?:(cups?|tbsp|tsp|tablespoons?|teaspoons?|oz|ounces?|lbs?|pounds?|g|grams?|kg|ml|milliliters?|liters?|l|pints?|quarts?|gallons?|pinch(?:es)?|dashe?s?|sprigs?|stalks?|cloves?|cans?|packages?|bunche?s?|sticks?|pieces?|slices?|heads?)\\b)?\\s*[.,]?\\s*(.+)"
+        let pattern = "^(\(numberToken)(?:\\s*-\\s*\(numberToken))?)?\\s*(?:(cups?|c|tbsp|tsp|tablespoons?|teaspoons?|oz|ounces?|lbs?|pounds?|g|grams?|kg|ml|milliliters?|liters?|l|pints?|quarts?|gallons?|pinch(?:es)?|dashe?s?|sprigs?|stalks?|cloves?|cans?|packages?|bunche?s?|sticks?|pieces?|slices?|heads?)\\b)?\\s*[.,]?\\s*(.+)"
 
         if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) {
             let range = NSRange(cleaned.startIndex..., in: cleaned)
@@ -63,9 +63,10 @@ enum IngredientLineParser {
                 let amountStr = match.range(at: 1).location != NSNotFound
                     ? (Range(match.range(at: 1), in: cleaned).map { String(cleaned[$0]).trimmingCharacters(in: .whitespaces) } ?? "")
                     : ""
-                let unit = match.range(at: 2).location != NSNotFound
+                let rawUnit = match.range(at: 2).location != NSNotFound
                     ? (Range(match.range(at: 2), in: cleaned).map { String(cleaned[$0]).trimmingCharacters(in: .whitespaces) } ?? "")
                     : ""
+                let unit = rawUnit.lowercased() == "c" ? "cup" : rawUnit
                 let name = match.range(at: 3).location != NSNotFound
                     ? (Range(match.range(at: 3), in: cleaned).map { String(cleaned[$0]).trimmingCharacters(in: .whitespaces) } ?? cleaned)
                     : cleaned

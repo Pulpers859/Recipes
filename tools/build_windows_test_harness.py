@@ -36,6 +36,13 @@ REPO = pathlib.Path(__file__).resolve().parents[1]
 APP = REPO / "Recipes" / "Recipes"
 TESTS = REPO / "Recipes" / "RecipeVaultTests"
 
+# These tests exercise app-only frameworks or services intentionally excluded
+# from the Foundation-only Windows package. GitHub's macOS/Xcode job runs them.
+XCODE_ONLY_TESTS = {
+    "ImageDataNormalizerTests.swift",
+    "URLRecipeScraperServiceTests.swift",
+}
+
 SWIFT_ROOT = pathlib.Path(
     os.environ.get(
         "RECIPES_SWIFT_ROOT",
@@ -52,6 +59,7 @@ STRIP_IMPORTS = [
 # Copied verbatim (already pure Foundation).
 VERBATIM_SOURCES = [
     "Service/IngredientLineParser.swift",
+    "Service/RecipeSchemaNormalizer.swift",
     "Service/JSONPayloadExtractor.swift",
     "Service/AIParsedRecipe.swift",
     "Service/RecipeTextHeuristics.swift",
@@ -233,6 +241,8 @@ def generate(out_dir: pathlib.Path) -> None:
     )
 
     for test_file in sorted(TESTS.glob("*.swift")):
+        if test_file.name in XCODE_ONLY_TESTS:
+            continue
         source = test_file.read_text(encoding="utf-8")
         source = re.sub(r"^\s*@MainActor\s*\n", "", source, flags=re.M)
         source = re.sub(r"@MainActor\s+", "", source)

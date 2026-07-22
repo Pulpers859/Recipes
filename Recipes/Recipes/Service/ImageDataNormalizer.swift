@@ -1,4 +1,5 @@
 import UIKit
+import ImageIO
 
 /// Downscales and re-encodes photo data before it is persisted so
 /// multi-megabyte camera images don't bloat the data store or stall
@@ -10,26 +11,43 @@ enum ImageDataNormalizer {
         maxDimension: CGFloat = 2000,
         compressionQuality: CGFloat = 0.85
     ) -> Data? {
-        guard let image = UIImage(data: data) else { return nil }
+        guard maxDimension.isFinite, maxDimension > 0,
+              let source = CGImageSourceCreateWithData(
+                data as CFData,
+                [kCGImageSourceShouldCache: false] as CFDictionary
+              ),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? NSNumber,
+              let height = properties[kCGImagePropertyPixelHeight] as? NSNumber
+        else { return nil }
 
-        let largestSide = max(image.size.width, image.size.height)
-        guard largestSide > 0 else { return data }
-        let scale = min(1, maxDimension / largestSide)
-        let targetSize = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+        let pixelWidth = width.doubleValue
+        let pixelHeight = height.doubleValue
+        guard pixelWidth > 0, pixelHeight > 0,
+              pixelWidth <= 50_000, pixelHeight <= 50_000,
+              pixelWidth * pixelHeight <= 120_000_000
+        else { return nil }
 
-        let format = UIGraphicsImageRendererFormat.default()
-        format.scale = 1
+        // ImageIO creates the thumbnail while decoding, avoiding a full-size
+        // bitmap allocation for high-resolution or malicious compressed files.
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: Int(maxDimension.rounded(.up)),
+            kCGImageSourceShouldCacheImmediately: true
+        ]
+        guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(
+            source,
+            0,
+            options as CFDictionary
+        ) else { return nil }
 
-        let resized = UIGraphicsImageRenderer(size: targetSize, format: format).image { _ in
-            image.draw(in: CGRect(origin: .zero, size: targetSize))
-        }
-
-        guard let resizedData = resized.jpegData(compressionQuality: compressionQuality) else {
-            return data
-        }
-        // When nothing was downscaled (image already within maxDimension),
-        // re-encoding can produce a LARGER file and double-compresses an
-        // existing JPEG. Never return something bigger than the original.
-        return resizedData.count < data.count ? resizedData : data
+        let resized = UIImage(cgImage: thumbnail)
+        guard let resizedData = resized.jpegData(compressionQuality: compressionQuality) else { return nil }
+        // When the source was already within bounds, avoid replacing it with
+        // a larger, double-compressed JPEG. A source above the bound must use
+        // the thumbnail even when its original encoding happened to be tiny.
+        let wasDownsampled = max(pixelWidth, pixelHeight) > Double(maxDimension)
+        return wasDownsampled || resizedData.count < data.count ? resizedData : data
     }
 }

@@ -9,6 +9,7 @@ struct RecipeEditorView: View {
     
     var recipe: Recipe
     let isNewImport: Bool
+    let importNotice: String?
     /// Batch-import preview: edits apply to the in-memory recipe only. The
     /// recipe must NOT be inserted into the model context here — the batch
     /// review's "Save N Recipes" owns insertion, so a previewed-then-excluded
@@ -70,11 +71,17 @@ struct RecipeEditorView: View {
         ) != initialSnapshot
     }
 
-    init(recipe: Recipe?, isNewImport: Bool = false, isPreviewOnly: Bool = false) {
+    init(
+        recipe: Recipe?,
+        isNewImport: Bool = false,
+        isPreviewOnly: Bool = false,
+        importNotice: String? = nil
+    ) {
         let r = recipe ?? Recipe()
         self.recipe = r
         self.isNewImport = isNewImport
         self.isPreviewOnly = isPreviewOnly
+        self.importNotice = importNotice
 
         let sortedSteps = r.steps.sorted { $0.order < $1.order }
         initialSnapshot = EditorSnapshot(
@@ -102,6 +109,27 @@ struct RecipeEditorView: View {
     
     var body: some View {
         Form {
+            if isNewImport, let importDisclosure {
+                Section {
+                    RVStatusBanner(message: importDisclosure.message, tone: importDisclosure.tone)
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+
+                    if let importNotice, !importNotice.isEmpty {
+                        RVStatusBanner(message: importNotice, tone: .warning)
+                            .listRowInsets(EdgeInsets())
+                            .listRowBackground(Color.clear)
+                    }
+
+                    if let sourceURL = recipe.sourceURL,
+                       let url = URL(string: sourceURL) {
+                        Link(destination: url) {
+                            Label("Open Original Recipe", systemImage: "safari")
+                        }
+                    }
+                }
+            }
+
             // MARK: - Basic Info
             Section("Basic Info") {
                 TextField("Recipe Title", text: $title)
@@ -206,16 +234,22 @@ struct RecipeEditorView: View {
             // MARK: - Ingredients
             Section("Ingredients") {
                 ForEach($ingredients) { $ingredient in
-                    HStack {
-                        TextField("Amt", value: $ingredient.amount, format: .number)
-                            .frame(width: 50)
-                            .keyboardType(.decimalPad)
-                        
-                        TextField("Unit", text: $ingredient.unit)
-                            .frame(width: 50)
-                        
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 12) {
+                            TextField("Amount", text: ingredientAmountBinding($ingredient))
+                                .frame(maxWidth: 96)
+                                .keyboardType(.decimalPad)
+                                .accessibilityLabel("Ingredient amount")
+
+                            TextField("Unit", text: $ingredient.unit)
+                                .frame(maxWidth: 120)
+                                .accessibilityLabel("Ingredient unit")
+                        }
+
                         TextField("Ingredient name", text: $ingredient.name)
+                            .accessibilityLabel("Ingredient name")
                     }
+                    .padding(.vertical, 3)
                     .font(.body)
                 }
                 .onDelete { indexSet in
@@ -226,32 +260,27 @@ struct RecipeEditorView: View {
                 }
                 
                 // Quick add
-                HStack {
-                    TextField("Amt", text: $newIngredientAmount)
-                        .frame(width: 50)
-                        .keyboardType(.decimalPad)
-                    TextField("Unit", text: $newIngredientUnit)
-                        .frame(width: 50)
-                    TextField("New ingredient", text: $newIngredientName)
-                    
-                    Button {
-                        guard !newIngredientName.isEmpty else { return }
-                        let ing = Ingredient(
-                            name: newIngredientName,
-                            // flexibleDouble accepts comma decimals for
-                            // non-US locales where Double("1,5") is nil.
-                            amount: IngredientLineParser.flexibleDouble(newIngredientAmount) ?? 0,
-                            unit: newIngredientUnit
-                        )
-                        ingredients.append(ing)
-                        newIngredientName = ""
-                        newIngredientAmount = ""
-                        newIngredientUnit = ""
-                    } label: {
-                        Image(systemName: "plus.circle.fill")
-                            .foregroundStyle(Color.rvAccent)
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 12) {
+                        TextField("Amount", text: $newIngredientAmount)
+                            .frame(maxWidth: 96)
+                            .keyboardType(.decimalPad)
+                        TextField("Unit", text: $newIngredientUnit)
+                            .frame(maxWidth: 120)
                     }
-                    .disabled(newIngredientName.isEmpty)
+                    HStack {
+                        TextField("New ingredient", text: $newIngredientName)
+
+                        Button {
+                            addIngredient()
+                        } label: {
+                            Image(systemName: "plus.circle.fill")
+                                .foregroundStyle(Color.rvAccent)
+                                .frame(minWidth: 44, minHeight: 44)
+                        }
+                        .accessibilityLabel("Add ingredient")
+                        .disabled(newIngredientName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
                 }
                 .font(.body)
             }
@@ -273,7 +302,8 @@ struct RecipeEditorView: View {
                         }
                         
                         TextField("Instruction", text: $step.instruction, axis: .vertical)
-                            .lineLimit(2...6)
+                            .lineLimit(2...)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 .onDelete { indexSet in
@@ -364,6 +394,49 @@ struct RecipeEditorView: View {
     }
     
     // MARK: - Actions
+
+    private var importDisclosure: (message: String, tone: RVStatusBanner.Tone)? {
+        let domain = recipe.sourceURL
+            .flatMap { URL(string: $0) }?
+            .host?
+            .replacingOccurrences(of: "www.", with: "")
+        let source = domain.map { " from \($0)" } ?? ""
+
+        switch recipe.sourceType {
+        case .url:
+            return ("Imported\(source) using the website's structured recipe data. No AI credits were used.", .success)
+        case .webFallback:
+            return ("Basic local import\(source). No AI credits were used, but the website did not provide usable structured recipe data. Review every field carefully.", .warning)
+        case .aiParsed:
+            return ("AI extracted this recipe\(source). This import used credits from your configured Claude API account. Review the result before saving.", .info)
+        case .pdf, .image:
+            return ("Review the imported recipe carefully before saving it to your vault.", .info)
+        case .manual:
+            return nil
+        }
+    }
+
+    private func ingredientAmountBinding(_ ingredient: Binding<Ingredient>) -> Binding<String> {
+        Binding(
+            get: { AmountFormatter.format(ingredient.wrappedValue.amount) },
+            set: { ingredient.wrappedValue.amount = IngredientLineParser.flexibleDouble($0) ?? 0 }
+        )
+    }
+
+    private func addIngredient() {
+        let name = newIngredientName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        ingredients.append(
+            Ingredient(
+                name: name,
+                amount: IngredientLineParser.flexibleDouble(newIngredientAmount) ?? 0,
+                unit: newIngredientUnit.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+        )
+        newIngredientName = ""
+        newIngredientAmount = ""
+        newIngredientUnit = ""
+    }
 
     /// Imports are inserted into the database before review so parsing results
     /// persist — cancelling the review must remove that recipe again, otherwise

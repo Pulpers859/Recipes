@@ -4,6 +4,9 @@ Unit tests for the hand-tuned heuristics most likely to regress when tweaked:
 
 - `ShoppingListServiceTests` — ingredient merge keys and unit conversion
 - `IngredientLineParserTests` — free-text ingredient line parsing and locale-tolerant number parsing
+- `RecipeSchemaNormalizerTests` — schema.org category, cuisine, keyword, timing, and image normalization
+- `URLRecipeScraperServiceTests` — Xcode-only full-path regression coverage for Delish-shaped JSON-LD
+- `ImageDataNormalizerTests` — Xcode-only bounded image downsampling and invalid-data rejection
 - `JSONPayloadExtractorTests` — extracting JSON from AI responses (fences, prose, arrays)
 - `MealPlanningServiceTests` — week semantics and shopping-list aggregation
 - `BackupSnapshotTests` — safety-snapshot filenames, pruning, legacy migration
@@ -35,10 +38,10 @@ baselines if the averages moved.
 ## Running on Windows (no Xcode)
 
 `python tools/build_windows_test_harness.py --run` generates a SwiftPM package
-from preprocessed copies of the pure-logic sources plus this whole test suite
-(corpus included) and runs it with the local Swift for Windows toolchain in
-about a second. Views and SwiftData persistence stay compile-unverified on
-Windows — that is what the GitHub Actions macOS workflow is for.
+from preprocessed copies of the pure-logic sources plus the Foundation-only
+tests (corpus included) and runs it with the local Swift for Windows toolchain.
+UIKit and full app-service tests are explicitly skipped there and run by the
+GitHub Actions macOS/Xcode job instead.
 
 ## Wiring
 
@@ -52,5 +55,6 @@ To run them from Xcode:
 
 Do not move this folder under `Recipes/Recipes`, and do not add these files to the `Recipes` app target. That recreates the `unable to find module dependency: 'XCTest'` and stale `@testable import RecipeVault` build failures.
 
-These tests are pure logic — no SwiftData container, no network, no UI — so
-they run in milliseconds and are safe in CI.
+The suite performs no live network requests and creates no persistent SwiftData
+container. Most tests are pure logic; the explicitly labeled Xcode-only tests
+cover UIKit image handling and app-service integration.

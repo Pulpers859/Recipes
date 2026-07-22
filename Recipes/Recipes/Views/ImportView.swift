@@ -122,7 +122,11 @@ struct ImportView: View {
             }
             .sheet(item: $importedRecipe) { recipe in
                 NavigationStack {
-                    RecipeEditorView(recipe: recipe, isNewImport: true)
+                    RecipeEditorView(
+                        recipe: recipe,
+                        isNewImport: true,
+                        importNotice: recipe.sourceURL == nil ? nil : scraper.lastWarning
+                    )
                 }
             }
             .sheet(isPresented: $showBatchReview) {
@@ -387,9 +391,13 @@ struct ImportView: View {
             }
 
             RVStatusBanner(
-                message: "Local and private-network URLs are blocked for safety. You will review the recipe before keeping it.",
+                message: urlImportCostMessage,
                 tone: .info
             )
+
+            Text("Local and private-network URLs are blocked for safety. You will review the recipe before keeping it.")
+                .font(.caption)
+                .foregroundStyle(Color.rvSubtleText)
         }
         .rvCard()
     }
@@ -425,7 +433,7 @@ struct ImportView: View {
             do {
                 let recipe = try await scraper.scrapeRecipe(
                     from: urlText,
-                    allowAI: parseModeSetting != "manual"
+                    mode: urlExtractionMode
                 )
                 // The user cancelled or left while we were fetching — don't
                 // insert an unreviewed recipe into the library.
@@ -623,7 +631,7 @@ struct ImportView: View {
                     else { throw ShareInboxService.ReadError.unreadablePayload }
                     let recipe = try await scraper.scrapeRecipe(
                         from: text,
-                        allowAI: parseModeSetting != "manual"
+                        mode: urlExtractionMode
                     )
                     guard !Task.isCancelled else { return }
                     modelContext.insert(recipe)
@@ -677,6 +685,25 @@ struct ImportView: View {
             return .manual
         default:
             return .auto
+        }
+    }
+
+    private var urlExtractionMode: URLRecipeScraperService.ExtractionMode {
+        switch parseModeSetting {
+        case "ai": return .aiOnly
+        case "manual": return .localOnly
+        default: return .automatic
+        }
+    }
+
+    private var urlImportCostMessage: String {
+        switch urlExtractionMode {
+        case .automatic:
+            return "Auto uses free structured website data first. Claude API credits are used only when that data is missing or unusable."
+        case .aiOnly:
+            return "AI Only sends the page to Claude and uses API credits from your configured Anthropic key."
+        case .localOnly:
+            return "Manual uses only local website parsing and never spends API credits. Results may need more cleanup."
         }
     }
 }
