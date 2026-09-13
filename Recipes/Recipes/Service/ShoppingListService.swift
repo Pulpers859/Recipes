@@ -154,8 +154,31 @@ class ShoppingListService {
         return count
     }
     
+    /// Brings rows that were saved under the old naming rules in line with the
+    /// current ones, so an existing list shows "onion" instead of
+    /// "onion (diced)" without having to be regenerated first.
+    ///
+    /// Deliberately narrow: only GENERATED rows are touched, because those are
+    /// derived from recipes and can be rebuilt at any time. A manually typed
+    /// item is left exactly as the user typed it. Nothing but the display name
+    /// changes — quantity, unit, category, checked state and recipe links are
+    /// untouched — and the transform is idempotent, so a second pass is a
+    /// no-op. Returns how many rows changed so the caller can skip saving.
+    @discardableResult
+    static func normalizeGeneratedItemNames(_ items: [ShoppingItem]) -> Int {
+        var changed = 0
+        for item in items where item.isGenerated {
+            let cleaned = cleanDisplayName(item.name)
+            if cleaned != item.name, !cleaned.isEmpty {
+                item.name = cleaned
+                changed += 1
+            }
+        }
+        return changed
+    }
+
     // MARK: - Merge Key
-    
+
     /// Extracts the BASE ingredient for deduplication.
     /// "200g liquid egg whites" and "32oz egg whites" both → "egg whites"
     /// "fat-free cheddar cheese" and "cheddar cheese" both → "cheddar cheese"
@@ -167,6 +190,92 @@ class ShoppingListService {
         categorize(ingredient: ingredientName)
     }
     
+    /// Removes parenthetical qualifiers from an ingredient name.
+    ///
+    /// Recipes use parentheses to describe the FORM an ingredient takes in
+    /// that dish — "onion (diced)", "parmesan (grated or shredded)". None of
+    /// that changes what you put in the basket, and it wrecked two things at
+    /// once: shopping rows read as noise, and the merge key kept
+    /// "onion (diced)" from ever matching a pantry entry called "onion", so
+    /// pantry coverage and recipe suggestions silently under-counted.
+    ///
+    /// The exception is a parenthetical naming a different AISLE rather than
+    /// a different preparation — "black beans (canned)" is not the same
+    /// purchase as dried black beans. Those words get promoted onto the front
+    /// of the name instead of being dropped, so no parentheses ever survive.
+    ///
+    /// Known limitation: when the parenthetical carries the ingredient's real
+    /// identity ("cheese (cheddar)"), this flattens it to "cheese". Recipes
+    /// phrase that as "cheddar cheese" far more often than in parentheses, so
+    /// the trade is worth it — but it is a trade.
+    nonisolated static func strippingParentheticals(_ rawName: String) -> String {
+        let original = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard original.firstIndex(of: "(") != nil, let regex = parentheticalRegex else { return original }
+
+        var working = original
+        var promoted: [String] = []
+
+        // Bounded rather than `while`: a malformed name with an unbalanced
+        // "(" must not be able to spin here.
+        for _ in 0..<4 {
+            let fullRange = NSRange(working.startIndex..., in: working)
+            let matches = regex.matches(in: working, range: fullRange)
+            guard !matches.isEmpty else { break }
+
+            let stripped = regex.stringByReplacingMatches(
+                in: working,
+                range: fullRange,
+                withTemplate: " "
+            )
+            let outside = stripped.lowercased()
+
+            for match in matches {
+                guard let range = Range(match.range, in: working) else { continue }
+                let inner = working[range]
+                    .trimmingCharacters(in: .whitespaces)
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "()"))
+                    .lowercased()
+                let tokens = Set(inner.split(whereSeparator: { !$0.isLetter }).map(String.init))
+
+                // Skip a word the base name already says, so
+                // "canned tomatoes (drained)" can't become "canned canned tomatoes".
+                for word in purchaseFormWords
+                where tokens.contains(word) && !outside.contains(word) && !promoted.contains(word) {
+                    promoted.append(word)
+                }
+            }
+
+            working = stripped
+        }
+
+        // An unbalanced "(" survived; keep only what came before it rather
+        // than shipping a dangling bracket to the shopping list.
+        if let danglingOpen = working.firstIndex(of: "(") {
+            let head = working[..<danglingOpen].trimmingCharacters(in: .whitespacesAndNewlines)
+            if !head.isEmpty {
+                working = head
+            }
+        }
+
+        working = working
+            .replacingOccurrences(of: #"\s+([,;])"#, with: "$1", options: .regularExpression)
+            .replacingOccurrences(of: #"\s{2,}"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: ",;-"))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // A name that was nothing BUT a parenthetical keeps its original
+        // text: a blank shopping row is worse than a noisy one.
+        guard !working.isEmpty else { return original }
+        guard !promoted.isEmpty else { return working }
+
+        var prefix = promoted.joined(separator: " ")
+        if working.first?.isUppercase == true {
+            prefix = prefix.prefix(1).uppercased() + String(prefix.dropFirst())
+        }
+        return prefix + " " + working
+    }
+
     static func parsedUnit(from rawValue: String) -> String? {
         let trimmed = rawValue.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         switch trimmed {
@@ -226,6 +335,21 @@ class ShoppingListService {
         ("greek yogurt", "greek yogurt"),
     ]
 
+    /// Parenthetical words that send you to a DIFFERENT part of the store,
+    /// not just a different cutting board. Deliberately tiny: every entry
+    /// here is a parenthetical the user still has to read, so it has to earn
+    /// its place. "unsalted", "large", "grated" and friends are not here —
+    /// they pick a variant off the same shelf.
+    private nonisolated static let purchaseFormWords = [
+        "canned", "jarred", "bottled", "frozen", "dried"
+    ]
+
+    /// Matches one innermost parenthetical plus any whitespace in front of
+    /// it. Applied repeatedly so nested groups unwrap from the inside out.
+    private nonisolated static let parentheticalRegex: NSRegularExpression? = {
+        try? NSRegularExpression(pattern: #"\s*\([^()]*\)"#)
+    }()
+
     private nonisolated static let leadingAmountRegex: NSRegularExpression? = {
         try? NSRegularExpression(pattern: #"^\d+[\./]?\d*\s*(g|oz|ml|lb|kg|cups?|tbsp|tsp)\s+"#, options: .caseInsensitive)
     }()
@@ -239,6 +363,12 @@ class ShoppingListService {
 
     private nonisolated static func mergeKey(name: String) -> String {
         var s = name.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Before anything else: "(diced)", "(grated or shredded)" and the
+        // like are pure noise for matching. Sharing this step with the
+        // display name guarantees what the user reads and what the app
+        // matches on can never drift apart.
+        s = strippingParentheticals(s)
 
         if let regex = leadingAmountRegex {
             s = regex.stringByReplacingMatches(in: s, range: NSRange(s.startIndex..., in: s), withTemplate: "")
@@ -295,10 +425,15 @@ class ShoppingListService {
     
     // MARK: - Display Name Cleanup
     
-    /// Clean up ingredient names for display (fix "eggs eggs", remove leading amounts, etc.)
+    /// Clean up ingredient names for display (fix "eggs eggs", drop
+    /// preparation parentheticals, etc.)
+    ///
+    /// Only generated rows come through here. A manually typed item is left
+    /// exactly as the user typed it — rewriting someone's own input is a
+    /// different thing from cleaning up derived data.
     private static func cleanDisplayName(_ name: String) -> String {
-        var s = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        
+        var s = strippingParentheticals(name)
+
         // Fix doubled words like "eggs eggs"
         let words = s.split(separator: " ")
         if words.count >= 2 {

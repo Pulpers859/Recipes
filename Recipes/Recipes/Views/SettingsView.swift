@@ -12,6 +12,7 @@ struct SettingsView: View {
     @AppStorage("ai_model_id") private var aiModelID = AIModelSettings.defaultModelID
     @AppStorage("keep_screen_awake") private var keepScreenAwake = true
     @AppStorage("analytics_enabled") private var analyticsEnabled = true
+    @AppStorage("show_pantry_suggestions") private var showPantrySuggestions = true
     
     @State private var apiKey = ""
     @State private var showAPIKey = false
@@ -233,6 +234,15 @@ struct SettingsView: View {
             Toggle("Keep Screen Awake", isOn: $keepScreenAwake)
                 .tint(Color.rvAccent)
             Stepper("Default Servings: \(defaultServings)", value: $defaultServings, in: 1...20)
+
+            Divider()
+
+            Toggle("Show “Ready To Cook” Suggestions", isOn: $showPantrySuggestions)
+                .tint(Color.rvAccent)
+            Text("A collapsible section on the Recipes tab listing recipes your pantry already covers completely. It stays hidden while nothing qualifies.")
+                .font(.caption)
+                .foregroundStyle(Color.rvSubtleText)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .rvCard()
     }

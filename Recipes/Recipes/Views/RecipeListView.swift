@@ -26,6 +26,12 @@ struct RecipeListView: View {
     @State private var pendingSpotlightRecipeID: UUID?
     @State private var spotlightRouteAttempts = 0
 
+    /// Dismissing the pantry section has to stick across launches, and the
+    /// user has to be able to get it back — Settings › Cooking Mode owns the
+    /// same key.
+    @AppStorage("show_pantry_suggestions") private var showPantrySuggestions = true
+    @AppStorage("pantry_suggestions_expanded") private var pantrySuggestionsExpanded = false
+
     @StateObject private var parser = RecipeParserService()
 
     enum SortOrder: String, CaseIterable {
@@ -89,6 +95,18 @@ struct RecipeListView: View {
         return hasher.finalize()
     }
 
+    /// Ingredients nobody stocks in a pantry list but everybody has. Keeping
+    /// this to tap water on purpose: salt, pepper and oil belong in the
+    /// user's own pantry marked as staples, which is what that flag is for.
+    private static let assumedOnHandKeys: Set<String> = ["water"]
+
+    /// Recipes the pantry can cover *completely*.
+    ///
+    /// This used to surface anything with a single matching ingredient, which
+    /// is how a recipe with 1 of 11 ingredients ready ended up pinned to the
+    /// home screen. A partial match isn't a suggestion, it's a shopping trip —
+    /// so the bar is now all-or-nothing and the section simply doesn't render
+    /// when nothing clears it.
     private func computePantrySuggestions() -> [PantrySuggestion] {
         let pantryKeys = Set(
             pantryItems
@@ -98,23 +116,31 @@ struct RecipeListView: View {
         guard !pantryKeys.isEmpty else { return [] }
 
         let suggestions = recipes.compactMap { recipe -> PantrySuggestion? in
-            let normalizedIngredients = recipe.normalizedIngredients
-            guard !normalizedIngredients.isEmpty else { return nil }
-            let ingredientKeys = Set(normalizedIngredients.map { ShoppingListService.normalizedIngredientKey($0.name) })
-            let matchCount = ingredientKeys.intersection(pantryKeys).count
-            guard matchCount > 0 else { return nil }
-            let score = Double(matchCount) / Double(max(ingredientKeys.count, 1))
-            return PantrySuggestion(recipe: recipe, matchedIngredients: matchCount, totalIngredients: ingredientKeys.count, score: score)
+            // An optional ingredient can't block "you could cook this now".
+            // The `isOptional` flag only ever gets set by the AI parser, so
+            // also honour recipes that say it in the name ("parsley
+            // (optional)") — checked before normalization strips it away.
+            let requiredKeys = Set(
+                recipe.normalizedIngredients
+                    .filter { !$0.isOptional && !$0.name.lowercased().contains("optional") }
+                    .map { ShoppingListService.normalizedIngredientKey($0.name) }
+                    .filter { !$0.isEmpty && !Self.assumedOnHandKeys.contains($0) }
+            )
+            guard !requiredKeys.isEmpty else { return nil }
+            guard requiredKeys.isSubset(of: pantryKeys) else { return nil }
+            return PantrySuggestion(recipe: recipe, readyCount: requiredKeys.count)
         }
 
         return suggestions
+            // Fewest ingredients first — the quickest win, which is the whole
+            // promise of the section.
             .sorted { lhs, rhs in
-                if lhs.score == rhs.score {
-                    return lhs.recipe.title < rhs.recipe.title
+                if lhs.readyCount == rhs.readyCount {
+                    return lhs.recipe.title.localizedCompare(rhs.recipe.title) == .orderedAscending
                 }
-                return lhs.score > rhs.score
+                return lhs.readyCount < rhs.readyCount
             }
-            .prefix(5)
+            .prefix(6)
             .map { $0 }
     }
 
@@ -350,27 +376,10 @@ struct RecipeListView: View {
                 }
                 .padding(.horizontal)
 
-                if !pantrySuggestions.isEmpty && searchText.isEmpty && selectedCategory == nil {
-                    VStack(alignment: .leading, spacing: 12) {
-                        SectionHeaderView(
-                            eyebrow: "From Your Pantry",
-                            title: "Cook With What You Have",
-                            subtitle: "Quick wins based on the ingredients you already keep on hand."
-                        )
+                if showPantrySuggestions && !pantrySuggestions.isEmpty
+                    && searchText.isEmpty && selectedCategory == nil {
+                    pantrySuggestionsSection
                         .padding(.horizontal)
-
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 14) {
-                                ForEach(pantrySuggestions) { suggestion in
-                                    NavigationLink(value: RecipeRoute(recipeID: suggestion.recipe.id)) {
-                                        pantrySuggestionCard(suggestion)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                            .padding(.horizontal)
-                        }
-                    }
                 }
 
                 VStack(alignment: .leading, spacing: 12) {
@@ -641,40 +650,99 @@ struct RecipeListView: View {
         .buttonStyle(.plain)
     }
 
-    private func pantrySuggestionCard(_ suggestion: PantrySuggestion) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(suggestion.recipe.category.displayName.uppercased())
-                .font(.caption2.weight(.bold))
-                .foregroundStyle(Color.rvSubtleText)
+    /// Collapsed by default and never rendered when empty, so it can't sit on
+    /// the home screen demanding attention. Fully dismissible from inside,
+    /// and restorable from Settings › Cooking Mode.
+    private var pantrySuggestionsSection: some View {
+        DisclosureGroup(isExpanded: $pantrySuggestionsExpanded) {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(pantrySuggestions) { suggestion in
+                    NavigationLink(value: RecipeRoute(recipeID: suggestion.recipe.id)) {
+                        pantrySuggestionRow(suggestion)
+                    }
+                    .buttonStyle(.plain)
+                }
 
-            Text(suggestion.recipe.title)
-                .font(.system(.headline, design: .serif, weight: .bold))
-                .foregroundStyle(Color.rvInk)
-                .lineLimit(2)
+                Text("Only recipes your pantry covers end to end appear here. Mark everyday items like salt and olive oil as staples in Pantry to catch more.")
+                    .font(.caption)
+                    .foregroundStyle(Color.rvSubtleText)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 4)
+
+                Button {
+                    showPantrySuggestions = false
+                    AnalyticsService.shared.track("pantry_suggestions_hidden")
+                } label: {
+                    Label("Hide This Section", systemImage: "eye.slash")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.rvSubtleText)
+                }
+                .buttonStyle(.plain)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 14)
+        } label: {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("FROM YOUR PANTRY")
+                        .font(.caption.weight(.bold))
+                        .tracking(1.2)
+                        .foregroundStyle(Color.rvSubtleText)
+
+                    Text("Ready To Cook")
+                        .font(.system(.title3, design: .serif, weight: .bold))
+                        .foregroundStyle(Color.rvInk)
+                }
+
+                Spacer(minLength: 8)
+
+                Text("\(pantrySuggestions.count)")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(Color.rvSubtleText)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.rvSurface, in: Capsule())
+            }
+        }
+        .tint(Color.rvAccent)
+        .rvCard()
+    }
+
+    private func pantrySuggestionRow(_ suggestion: PantrySuggestion) -> some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(suggestion.recipe.category.displayName.uppercased())
+                    .font(.caption2.weight(.bold))
+                    .tracking(0.8)
+                    .foregroundStyle(Color.rvSubtleText)
+
+                Text(suggestion.recipe.title)
+                    .font(.system(.headline, design: .serif, weight: .bold))
+                    .foregroundStyle(Color.rvInk)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Label(
+                    "All \(suggestion.readyCount) ingredient\(suggestion.readyCount == 1 ? "" : "s") on hand",
+                    systemImage: "checkmark.circle.fill"
+                )
+                .font(.caption)
+                .foregroundStyle(Color.rvPrimary)
+            }
 
             Spacer(minLength: 8)
 
-            HStack(spacing: 6) {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(Color.rvPrimary)
-                Text("\(suggestion.matchedIngredients) of \(suggestion.totalIngredients) ingredients ready")
-                    .font(.caption)
-                    .foregroundStyle(Color.rvSubtleText)
-            }
-
-            ProgressView(value: suggestion.score)
-                .tint(Color.rvAccent)
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(Color.rvMuted)
         }
-        .padding(16)
-        .frame(width: 230, alignment: .leading)
-        .frame(minHeight: 150, alignment: .leading)
-        .background(Color.white.opacity(0.92))
-        .clipShape(RoundedRectangle(cornerRadius: RVDesign.cardRadius, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: RVDesign.cardRadius, style: .continuous)
-                .stroke(Color.white.opacity(0.6), lineWidth: 1)
-        }
-        .shadow(color: .black.opacity(0.05), radius: 12, y: 6)
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            Color.rvSurface.opacity(0.9),
+            in: RoundedRectangle(cornerRadius: RVDesign.controlRadius, style: .continuous)
+        )
     }
 
     // MARK: - Menus
@@ -795,36 +863,14 @@ private struct RecipeRoute: Hashable {
     let recipeID: UUID
 }
 
+/// A recipe whose every required ingredient is already in the pantry.
+/// `readyCount` is that ingredient count — there is no partial state here by
+/// design, so there is no ratio to score.
 private struct PantrySuggestion: Identifiable {
     let recipe: Recipe
-    let matchedIngredients: Int
-    let totalIngredients: Int
-    let score: Double
+    let readyCount: Int
 
     var id: UUID { recipe.id }
-}
-
-private struct SectionHeaderView: View {
-    let eyebrow: String
-    let title: String
-    let subtitle: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(eyebrow.uppercased())
-                .font(.caption.weight(.bold))
-                .tracking(1.2)
-                .foregroundStyle(Color.rvSubtleText)
-
-            Text(title)
-                .font(.system(.title3, design: .serif, weight: .bold))
-                .foregroundStyle(Color.rvInk)
-
-            Text(subtitle)
-                .font(.subheadline)
-                .foregroundStyle(Color.rvSubtleText)
-        }
-    }
 }
 
 // MARK: - Filter Chip

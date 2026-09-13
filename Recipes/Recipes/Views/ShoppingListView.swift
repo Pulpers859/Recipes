@@ -94,6 +94,9 @@ struct ShoppingListView: View {
                     }
                 }
             }
+            .task {
+                normalizeExistingGeneratedNames()
+            }
             .alert("Clear All Items?", isPresented: $showClearConfirm) {
                 Button("Clear All", role: .destructive) { clearAll() }
                 Button("Cancel", role: .cancel) { }
@@ -116,10 +119,12 @@ struct ShoppingListView: View {
             title: "Shopping List",
             subtitle: "Everything you still need to buy, organized by aisle and adjusted for what your pantry already covers.",
             systemImage: "cart.fill",
+            // Two metrics, per the UI foundation. The pantry-adjusted count
+            // was a third pill saying the same thing as the support line
+            // below, and squeezed all three into unreadable columns.
             metrics: [
                 ("Remaining", "\(remainingCount)"),
-                ("Picked Up", "\(checkedCount)"),
-                ("Pantry Adjusted", "\(pantryAdjustedCount)")
+                ("Picked Up", "\(checkedCount)")
             ]
         ) {
             VStack(alignment: .leading, spacing: 10) {
@@ -265,8 +270,18 @@ struct ShoppingListView: View {
         }
     }
 
+    /// One shopping row.
+    ///
+    /// The previous layout put five fixed-width things on a single line —
+    /// checkbox, quantity badge, name, a "Stock" pill and a trash button —
+    /// which left roughly 60pt for the ingredient name on a phone. That's why
+    /// "heavy cream" wrapped onto two lines and the word "Stock" itself broke
+    /// into "Sto / ck". The fix is structural, not cosmetic: the name now owns
+    /// the row's width, and the two secondary actions moved into one compact
+    /// menu. Delete is still one visible tap away (the menu is a button, not a
+    /// long-press), which is what the old comment here was protecting.
     private func shoppingItemRow(_ item: ShoppingItem) -> some View {
-        HStack(alignment: .top, spacing: 14) {
+        HStack(alignment: .top, spacing: 12) {
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     item.isChecked.toggle()
@@ -277,62 +292,57 @@ struct ShoppingListView: View {
                 Image(systemName: item.isChecked ? "checkmark.circle.fill" : "circle")
                     .font(.title2)
                     .foregroundStyle(item.isChecked ? Color.rvPrimary : Color.rvMuted)
+                    .frame(width: 30, height: 30)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .padding(.top, 2)
             .accessibilityLabel(item.isChecked ? "Mark \(item.name) as not picked up" : "Mark \(item.name) as picked up")
 
-            if item.hasQuantity {
-                quantityBadge(for: item)
-            }
-
             VStack(alignment: .leading, spacing: 6) {
-                Text(item.name)
-                    .font(.body.weight(.medium))
-                    .strikethrough(item.isChecked)
-                    .foregroundStyle(item.isChecked ? Color.rvSubtleText : Color.rvInk)
-                    .multilineTextAlignment(.leading)
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text(item.name)
+                        .font(.body.weight(.medium))
+                        .strikethrough(item.isChecked)
+                        .foregroundStyle(item.isChecked ? Color.rvSubtleText : Color.rvInk)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
 
+                    Spacer(minLength: 6)
+
+                    if item.hasQuantity {
+                        // Priority sits on the badge, not the name: the badge
+                        // is fixed-size and must be measured first, and the
+                        // name is the one that should absorb the slack by
+                        // wrapping.
+                        quantityBadge(for: item)
+                            .layoutPriority(1)
+                    }
+                }
+
+                // Truncated rather than wrapped: a long recipe title repeated
+                // down every row is what buried the actual groceries before.
                 if let sourceLine = sourceRecipeLine(for: item) {
                     Label(sourceLine, systemImage: "fork.knife")
                         .font(.caption)
                         .foregroundStyle(Color.rvSubtleText)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 }
 
                 if let pantryLine = item.pantryCoverageText {
                     Label(pantryLine, systemImage: "cabinet.fill")
                         .font(.caption)
                         .foregroundStyle(Color.rvSubtleText)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 }
             }
+            // Claims the slack so the card fills the row and the menu stays
+            // pinned to the trailing edge; the old layout got this from a
+            // Spacer that no longer exists.
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            Spacer(minLength: 10)
-
-            Button {
-                stockInPantry(item)
-            } label: {
-                Label(item.isChecked ? "Pantry" : "Stock", systemImage: "shippingbox.fill")
-                    .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(item.isChecked ? Color.rvSecondary.opacity(0.35) : Color.rvSurface, in: Capsule())
-                    .foregroundStyle(Color.rvInk)
-            }
-            .buttonStyle(.plain)
-
-            // Visible delete, matching the pantry rows — deletion must not
-            // hide behind a long-press only.
-            Button(role: .destructive) {
-                deleteItem(item)
-            } label: {
-                Image(systemName: "trash")
-                    .font(.subheadline)
-                    .foregroundStyle(.red.opacity(0.7))
-                    .frame(minWidth: 32, minHeight: 36)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Delete \(item.name)")
+            itemActionsMenu(for: item)
         }
         .padding(16)
         .background(item.isChecked ? Color.rvSurface.opacity(0.9) : Color.rvPaper)
@@ -341,13 +351,38 @@ struct ShoppingListView: View {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .stroke(Color.white.opacity(0.7), lineWidth: 1)
         }
-        .contextMenu {
+    }
+
+    private func itemActionsMenu(for item: ShoppingItem) -> some View {
+        Menu {
+            Button {
+                stockInPantry(item)
+            } label: {
+                Label(item.isChecked ? "Move to Pantry" : "Stock in Pantry", systemImage: "shippingbox.fill")
+            }
+
             Button(role: .destructive) {
                 deleteItem(item)
             } label: {
                 Label("Delete Item", systemImage: "trash")
             }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(Color.rvSubtleText)
+                .frame(width: 32, height: 32)
+                .background(Color.rvSurface, in: Circle())
+                .contentShape(Circle())
         }
+        .accessibilityLabel("More actions for \(item.name)")
+    }
+
+    /// Rows saved before the parenthetical cleanup landed would otherwise keep
+    /// reading "onion (diced)" until the list was regenerated. Idempotent, so
+    /// running it on every appearance costs one no-op pass and never writes.
+    private func normalizeExistingGeneratedNames() {
+        guard ShoppingListService.normalizeGeneratedItemNames(items) > 0 else { return }
+        _ = saveChanges(failureMessage: "Could not tidy up shopping item names")
     }
 
     private func deleteItem(_ item: ShoppingItem) {
@@ -361,8 +396,11 @@ struct ShoppingListView: View {
             .font(.caption.weight(.bold))
             .foregroundStyle(Color.rvPrimary)
             .lineLimit(1)
+            // Never let the layout squeeze "0.25 cup" into "0.25 / cup" —
+            // the quantity is the one thing you read at the shelf.
+            .fixedSize()
             .padding(.horizontal, 10)
-            .padding(.vertical, 8)
+            .padding(.vertical, 6)
             .background(Color.rvSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
