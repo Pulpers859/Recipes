@@ -351,6 +351,29 @@ struct ShoppingListView: View {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .stroke(Color.white.opacity(0.7), lineWidth: 1)
         }
+        // Folding the old standalone trash button into the menu cost VoiceOver
+        // its directly-labelled delete. These put it back without spending
+        // horizontal space: a rotor action on the row, and long-press for
+        // everyone else.
+        .accessibilityAction(named: Text("Delete \(item.name)")) {
+            deleteItem(item)
+        }
+        .accessibilityAction(named: Text(item.isChecked ? "Move \(item.name) to pantry" : "Stock \(item.name) in pantry")) {
+            stockInPantry(item)
+        }
+        .contextMenu {
+            Button {
+                stockInPantry(item)
+            } label: {
+                Label(item.isChecked ? "Move to Pantry" : "Stock in Pantry", systemImage: "shippingbox.fill")
+            }
+
+            Button(role: .destructive) {
+                deleteItem(item)
+            } label: {
+                Label("Delete Item", systemImage: "trash")
+            }
+        }
     }
 
     private func itemActionsMenu(for item: ShoppingItem) -> some View {
@@ -380,9 +403,21 @@ struct ShoppingListView: View {
     /// Rows saved before the parenthetical cleanup landed would otherwise keep
     /// reading "onion (diced)" until the list was regenerated. Idempotent, so
     /// running it on every appearance costs one no-op pass and never writes.
+    ///
+    /// Failure is deliberately silent. This is cosmetic cleanup the user never
+    /// asked for, and routing it through `saveChanges` meant a persistent save
+    /// problem would raise the same alert every single time the Shopping tab
+    /// was opened, with nothing the user could do about it. Rolling back keeps
+    /// the next appearance retrying from a clean state rather than sitting on
+    /// half-renamed rows; alerts stay reserved for actions the user took.
     private func normalizeExistingGeneratedNames() {
         guard ShoppingListService.normalizeGeneratedItemNames(items) > 0 else { return }
-        _ = saveChanges(failureMessage: "Could not tidy up shopping item names")
+        do {
+            try modelContext.save()
+        } catch {
+            modelContext.rollback()
+            AnalyticsService.shared.track("shopping_name_normalize_failed")
+        }
     }
 
     private func deleteItem(_ item: ShoppingItem) {

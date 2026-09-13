@@ -667,7 +667,7 @@ struct RecipeListView: View {
                     .buttonStyle(.plain)
                 }
 
-                Text("Only recipes your pantry covers end to end appear here. Mark everyday items like salt and olive oil as staples in Pantry to catch more.")
+                Text("Only recipes your pantry covers end to end appear here, matched by ingredient rather than amount — worth a glance at quantities before you start. Mark everyday items like salt and olive oil as staples in Pantry to catch more.")
                     .font(.caption)
                     .foregroundStyle(Color.rvSubtleText)
                     .fixedSize(horizontal: false, vertical: true)
@@ -725,8 +725,12 @@ struct RecipeListView: View {
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
 
+                // Deliberately "in your pantry", not "on hand": the match is
+                // by ingredient presence, not amount. A pantry holding 0.1 lb
+                // of chicken satisfies a recipe needing 2 lb, so a flat claim
+                // that everything is ready would be one the data can't back.
                 Label(
-                    "All \(suggestion.readyCount) ingredient\(suggestion.readyCount == 1 ? "" : "s") on hand",
+                    "All \(suggestion.readyCount) ingredient\(suggestion.readyCount == 1 ? "" : "s") in your pantry",
                     systemImage: "checkmark.circle.fill"
                 )
                 .font(.caption)
