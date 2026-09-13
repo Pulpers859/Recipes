@@ -607,25 +607,50 @@ struct PantryView: View {
             }
 
             // Don't duplicate items already present after a partial restore.
-            let existingKeys = Set(pantryItems.map {
+            // `var`, and updated as we go: built once, a snapshot holding both
+            // "onion" and "onion (diced)" restored BOTH, since neither was
+            // ever checked against the other.
+            var existingKeys = Set(pantryItems.map {
                 ShoppingListService.normalizedIngredientKey($0.name)
             })
             var snapshot = pantryItems
             var added = 0
-            for item in restored where !existingKeys.contains(ShoppingListService.normalizedIngredientKey(item.name)) {
+            var skipped = 0
+            for item in restored {
+                let key = ShoppingListService.normalizedIngredientKey(item.name)
+                guard !existingKeys.contains(key) else {
+                    skipped += 1
+                    continue
+                }
+                existingKeys.insert(key)
                 modelContext.insert(item)
                 snapshot.append(item)
                 added += 1
             }
 
             guard added > 0 else {
-                showStatus("Those pantry items are already restored.", tone: .info)
+                // Matching is by normalized name, so this is not the same
+                // claim as "already restored" — the snapshot's amounts were
+                // dropped in favour of what's in the pantry now. Say that.
+                showStatus(
+                    skipped == 1
+                        ? "The 1 item in that snapshot matches a pantry entry you already have, so nothing was added."
+                        : "All \(skipped) items in that snapshot match pantry entries you already have, so nothing was added.",
+                    tone: .info
+                )
                 return
             }
 
             if persistPantryChanges(snapshot: snapshot) {
-                showStatus("Restored \(added) \(added == 1 ? "pantry item" : "pantry items") from backup.")
-                AnalyticsService.shared.track("pantry_restored", metadata: ["count": "\(added)"])
+                var message = "Restored \(added) \(added == 1 ? "pantry item" : "pantry items") from backup."
+                if skipped > 0 {
+                    message += " \(skipped) already \(skipped == 1 ? "matched an entry" : "matched entries") you have, so your current \(skipped == 1 ? "amount was" : "amounts were") kept."
+                }
+                showStatus(message)
+                AnalyticsService.shared.track(
+                    "pantry_restored",
+                    metadata: ["count": "\(added)", "skipped": "\(skipped)"]
+                )
             }
         } catch {
             showError("Could not restore pantry: \(error.localizedDescription)")

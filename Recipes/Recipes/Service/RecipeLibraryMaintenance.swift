@@ -121,8 +121,12 @@ enum RecipeLibraryMaintenance {
         var message = skippedCount > 0
             ? "Imported \(insertedCount) recipes (\(skippedCount) duplicates skipped)."
             : "Imported \(insertedCount) recipes successfully!"
-        if !restored.isEmpty {
-            message += " Also restored \(restored.joined(separator: ", "))."
+        if !restored.fragments.isEmpty {
+            message += " Also restored \(restored.fragments.joined(separator: ", "))."
+        }
+        if restored.pantryNameCollisions > 0 {
+            let n = restored.pantryNameCollisions
+            message += " \(n) pantry \(n == 1 ? "item" : "items") in the file already \(n == 1 ? "matches an entry" : "match entries") you have, so your current \(n == 1 ? "amount was" : "amounts were") kept."
         }
         if importResult.unreadableCount > 0 {
             // A partial import must never read as a full success.
@@ -132,22 +136,40 @@ enum RecipeLibraryMaintenance {
     }
 
     /// Additively merges pantry/shopping/meal-plan records from a v4 backup.
-    /// Returns human-readable fragments describing what was restored (empty
-    /// when the backup carried no auxiliary sections or everything existed).
+    ///
+    /// Pantry items are matched by normalized name, which is deliberately
+    /// fuzzy — "onion (diced)" and "onion" are one ingredient. So a backup can
+    /// carry an entry the user keeps under a slightly different name, and its
+    /// amount is dropped in favour of what's already in the pantry. That is
+    /// the right call (current stock is the truth), but it has to be
+    /// *reported* rather than vanish, so the count comes back with the
+    /// summary.
     private static func mergeAuxiliarySections(
         from importResult: RecipeExportService.ImportResult,
         modelContext: ModelContext
-    ) -> [String] {
+    ) -> AuxiliaryMergeSummary {
         var fragments: [String] = []
+        var pantryNameCollisions = 0
 
         if !importResult.pantryItems.isEmpty {
             let existing = (try? modelContext.fetch(FetchDescriptor<PantryItem>())) ?? []
             let existingIDs = Set(existing.map(\.id))
-            let existingKeys = Set(existing.map { ShoppingListService.normalizedIngredientKey($0.name) })
+            // `var`, and updated as we go. Built once and never updated, a
+            // backup carrying both "onion" and "onion (diced)" inserted BOTH,
+            // defeating the dedupe against the file's own contents.
+            var existingKeys = Set(existing.map { ShoppingListService.normalizedIngredientKey($0.name) })
             var added = 0
-            for item in importResult.pantryItems
-            where !existingIDs.contains(item.id)
-                && !existingKeys.contains(ShoppingListService.normalizedIngredientKey(item.name)) {
+            for item in importResult.pantryItems where !existingIDs.contains(item.id) {
+                // A matching id means the identical record is already here —
+                // expected on a re-import, no loss, not counted. A matching
+                // NAME means the user's version won over the file's, which is
+                // the case worth surfacing.
+                let key = ShoppingListService.normalizedIngredientKey(item.name)
+                guard !existingKeys.contains(key) else {
+                    pantryNameCollisions += 1
+                    continue
+                }
+                existingKeys.insert(key)
                 modelContext.insert(item)
                 added += 1
             }
@@ -186,7 +208,17 @@ enum RecipeLibraryMaintenance {
             if added > 0 { fragments.append("\(added) meal \(added == 1 ? "plan" : "plans")") }
         }
 
-        return fragments
+        return AuxiliaryMergeSummary(
+            fragments: fragments,
+            pantryNameCollisions: pantryNameCollisions
+        )
+    }
+
+    /// What an auxiliary merge actually did: what landed, and what was
+    /// deliberately left out so the caller can say so.
+    private struct AuxiliaryMergeSummary {
+        let fragments: [String]
+        let pantryNameCollisions: Int
     }
 
     /// Outcome of a maintenance action: the user-facing message plus an

@@ -82,8 +82,16 @@ struct RecipeListView: View {
     /// body re-normalized every ingredient of every recipe on every render.
     @State private var pantrySuggestions: [PantrySuggestion] = []
 
-    /// Cheap change-key for the suggestions: pantry composition + library
-    /// size. (An ingredient edit alone refreshes on next tab appearance.)
+    /// Bumped when the user returns to the root of this tab. Editing a recipe
+    /// pushes a destination, and popping back does NOT re-run `.task` because
+    /// the root view never left the hierarchy — so a renamed ingredient would
+    /// otherwise leave a stale "all in your pantry" claim on screen.
+    @State private var suggestionRefreshToken = 0
+
+    /// Cheap change-key for the suggestions. Everything hashed here is read on
+    /// every render, so it has to stay O(cheap): hashing every ingredient NAME
+    /// would move the per-render normalization cost this cache exists to avoid
+    /// straight back into the key.
     private var pantrySuggestionKey: Int {
         var hasher = Hasher()
         for item in pantryItems {
@@ -92,6 +100,16 @@ struct RecipeListView: View {
             hasher.combine(item.amount > 0)
         }
         hasher.combine(recipes.count)
+        // Covers every edit to an EXISTING recipe: the editor is a sheet over
+        // a pushed detail view, so changing one always ends in a pop back to
+        // root. Deliberately not hashing ingredient contents or even counts —
+        // touching `.ingredients` on every recipe per render risks decoding
+        // each stored array, which is the cost this cache exists to avoid,
+        // and it would catch nothing `recipes.count` and this token miss.
+        hasher.combine(suggestionRefreshToken)
+        // Toggling visibility has to force a recompute outright, rather than
+        // depending on tab-appearance semantics to re-run the task.
+        hasher.combine(showPantrySuggestions)
         return hasher.finalize()
     }
 
@@ -108,6 +126,10 @@ struct RecipeListView: View {
     /// so the bar is now all-or-nothing and the section simply doesn't render
     /// when nothing clears it.
     private func computePantrySuggestions() -> [PantrySuggestion] {
+        // Hidden means hidden: don't normalize every ingredient of every
+        // recipe to build a list nothing will render.
+        guard showPantrySuggestions else { return [] }
+
         let pantryKeys = Set(
             pantryItems
                 .filter { $0.isStaple || $0.amount > 0 }
@@ -202,6 +224,14 @@ struct RecipeListView: View {
             }
             .onChange(of: recipes.count) { _, _ in
                 routePendingSpotlightRecipe()
+            }
+            // Back at the root after a detail/editor round-trip. `.task` won't
+            // fire again (the root never disappeared), and an ingredient
+            // rename moves none of the counts in the key, so nudge it here.
+            .onChange(of: navigationPath.isEmpty) { _, isAtRoot in
+                if isAtRoot {
+                    suggestionRefreshToken &+= 1
+                }
             }
             .alert("Delete Selected Recipes?", isPresented: $showDeleteSelectedConfirm) {
                 Button("Delete", role: .destructive) { Task { await deleteSelectedRecipes() } }
