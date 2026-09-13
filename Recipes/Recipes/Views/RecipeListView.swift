@@ -653,6 +653,10 @@ struct RecipeListView: View {
     /// Collapsed by default and never rendered when empty, so it can't sit on
     /// the home screen demanding attention. Fully dismissible from inside,
     /// and restorable from Settings › Cooking Mode.
+    ///
+    /// The collapsed header is deliberately one compact line. The complaint
+    /// this replaces was about how much of the main page the old carousel ate,
+    /// so a stacked eyebrow + serif title would have missed half the point.
     private var pantrySuggestionsSection: some View {
         DisclosureGroup(isExpanded: $pantrySuggestionsExpanded) {
             VStack(alignment: .leading, spacing: 10) {
@@ -682,30 +686,28 @@ struct RecipeListView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, 14)
         } label: {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("FROM YOUR PANTRY")
-                        .font(.caption.weight(.bold))
-                        .tracking(1.2)
-                        .foregroundStyle(Color.rvSubtleText)
+            HStack(spacing: 8) {
+                Image(systemName: "cabinet.fill")
+                    .font(.footnote)
+                    .foregroundStyle(Color.rvPrimary)
 
-                    Text("Ready To Cook")
-                        .font(.system(.title3, design: .serif, weight: .bold))
-                        .foregroundStyle(Color.rvInk)
-                }
-
-                Spacer(minLength: 8)
+                Text("Ready To Cook")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.rvInk)
+                    .lineLimit(1)
 
                 Text("\(pantrySuggestions.count)")
-                    .font(.caption.weight(.bold))
+                    .font(.caption2.weight(.bold))
                     .foregroundStyle(Color.rvSubtleText)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
                     .background(Color.rvSurface, in: Capsule())
+
+                Spacer(minLength: 8)
             }
         }
         .tint(Color.rvAccent)
-        .rvCard()
+        .rvCard(padding: 14)
     }
 
     private func pantrySuggestionRow(_ suggestion: PantrySuggestion) -> some View {
