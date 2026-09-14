@@ -9,6 +9,59 @@ import Foundation
 /// belong in this file, guarded by the corpus scores.
 nonisolated enum RecipeTextHeuristics {
 
+    // MARK: - Extracted Text Repair
+
+    /// Undoes character-level corruption that PDF text extraction produces for
+    /// subsetted fonts.
+    ///
+    /// A cookbook PDF can embed a font subset whose glyphs sit at low custom
+    /// codes. When extraction falls back to reading those codes as ASCII
+    /// instead of applying the font's ToUnicode map, real characters come out
+    /// as unrelated punctuation. Confirmed on a real import: the `fl` ligature
+    /// arrived as `!` ("!our"), `/` as `%` ("1 1%3 CUP"), and `:` as `&`
+    /// ("MACROS& 43C").
+    ///
+    /// This is not cosmetic. `splitIntoRecipeChunks` looks for "MACROS:" to
+    /// find where a recipe starts, so the `&` corruption made a three-recipe
+    /// cookbook import as ONE merged recipe. It also corrupts quantities,
+    /// which is the thing this app most has to get right — "1 1%3 CUP" is not
+    /// a number anyone can shop from.
+    ///
+    /// Every rule is deliberately guarded so legitimate text survives. On the
+    /// source file these were derived from, they correct 17 occurrences and
+    /// leave all 12 genuine uses (`2% plain greek yogurt`, `GARLIC POWDER &
+    /// SALT`, `LUNCH & DINNER`) untouched.
+    static func repairExtractedText(_ text: String) -> String {
+        var repaired = text
+        for rule in repairRules {
+            repaired = repaired.replacingOccurrences(
+                of: rule.pattern,
+                with: rule.template,
+                options: .regularExpression
+            )
+        }
+        return repaired
+    }
+
+    private static let repairRules: [(pattern: String, template: String)] = [
+        // "1 1%3 CUP" -> "1 1/3 CUP". Digits required on BOTH sides, so a real
+        // percentage ("2% plain greek yogurt", "93% lean") is never touched —
+        // those are always followed by a space or end of word.
+        (#"(?<=\d)%(?=\d)"#, "/"),
+        // "GARLIC SALT%PEPPER" -> "GARLIC SALT/PEPPER". A percent wedged
+        // between two letters with no spaces is never legitimate prose.
+        (#"(?<=\p{L})%(?=\p{L})"#, "/"),
+        // "MACROS& 43C" -> "MACROS: 43C". A letter before and whitespace after
+        // is the signature of a corrupted colon; it leaves "GARLIC POWDER &
+        // SALT", "LUNCH & DINNER", "M&M" and "AT&T" alone, since those all
+        // have either a space before the ampersand or a letter after it.
+        (#"(?<=\p{L})&(?=\s|$)"#, ":"),
+        // "!our" -> "flour". "!" never legally appears at the START of a word,
+        // so a "!" that opens one is the fl ligature glyph. Requiring a
+        // non-letter before it keeps real exclamations ("Wow!great") intact.
+        (#"(?<!\p{L})!(?=\p{Ll})"#, "fl"),
+    ]
+
     // MARK: - Recipe Boundary Detection
 
     /// Tuned for macro-style cookbook PDFs where each recipe starts on a page

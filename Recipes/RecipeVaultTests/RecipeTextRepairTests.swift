@@ -1,0 +1,128 @@
+import XCTest
+@testable import Recipes
+
+/// Covers `RecipeTextHeuristics.repairExtractedText`, which undoes the
+/// character corruption PDF extraction produces for subsetted fonts.
+///
+/// Every string here is taken from a real failed import of a macro-style
+/// cookbook PDF, where the `fl` ligature arrived as `!`, `/` as `%`, and `:`
+/// as `&`.
+final class RecipeTextRepairTests: XCTestCase {
+
+    // MARK: - Corruption Is Repaired
+
+    func testFractionSlashesAreRestored() {
+        let repaired = RecipeTextHeuristics.repairExtractedText("1 1%3 CUP FAT-FREE HALF AND HALF")
+        XCTAssertEqual(repaired, "1 1/3 CUP FAT-FREE HALF AND HALF")
+    }
+
+    func testRatiosBetweenDigitsAreRestored() {
+        // "93%7" is 93/7 lean ground beef, not a percentage.
+        XCTAssertEqual(
+            RecipeTextHeuristics.repairExtractedText("20OZ GROUND BEEF (93%7)"),
+            "20OZ GROUND BEEF (93/7)"
+        )
+    }
+
+    func testSlashBetweenWordsIsRestored() {
+        XCTAssertEqual(
+            RecipeTextHeuristics.repairExtractedText("2 TBSP GARLIC SALT%PEPPER"),
+            "2 TBSP GARLIC SALT/PEPPER"
+        )
+    }
+
+    func testLabelColonsAreRestored() {
+        XCTAssertEqual(
+            RecipeTextHeuristics.repairExtractedText("MACROS& 43C 13F 38P PER SERVING"),
+            "MACROS: 43C 13F 38P PER SERVING"
+        )
+        XCTAssertEqual(
+            RecipeTextHeuristics.repairExtractedText("SERVINGS& 6\nPREP& 30 MINUTES"),
+            "SERVINGS: 6\nPREP: 30 MINUTES"
+        )
+    }
+
+    func testFlLigatureIsRestored() {
+        XCTAssertEqual(
+            RecipeTextHeuristics.repairExtractedText("Add 2 Tbsp !our and stir"),
+            "Add 2 Tbsp flour and stir"
+        )
+    }
+
+    // MARK: - Legitimate Text Survives
+
+    func testRealPercentagesAreNotTouched() {
+        // The guard that matters: a percentage is followed by a space or the
+        // end of a word, never by another digit.
+        XCTAssertEqual(
+            RecipeTextHeuristics.repairExtractedText("150G 2% PLAIN GREEK YOGURT"),
+            "150G 2% PLAIN GREEK YOGURT"
+        )
+        XCTAssertEqual(
+            RecipeTextHeuristics.repairExtractedText("93% lean beef"),
+            "93% lean beef"
+        )
+    }
+
+    func testRealAmpersandsAreNotTouched() {
+        XCTAssertEqual(
+            RecipeTextHeuristics.repairExtractedText("GARLIC POWDER & SALT TO TASTE"),
+            "GARLIC POWDER & SALT TO TASTE"
+        )
+        XCTAssertEqual(
+            RecipeTextHeuristics.repairExtractedText("QUESO CHICKEN & RICE"),
+            "QUESO CHICKEN & RICE"
+        )
+        // A letter on BOTH sides is a name, not a corrupted colon.
+        XCTAssertEqual(
+            RecipeTextHeuristics.repairExtractedText("M&M cookies"),
+            "M&M cookies"
+        )
+    }
+
+    func testRealExclamationsAreNotTouched() {
+        XCTAssertEqual(
+            RecipeTextHeuristics.repairExtractedText("Enjoy! Serve warm."),
+            "Enjoy! Serve warm."
+        )
+        XCTAssertEqual(
+            RecipeTextHeuristics.repairExtractedText("Wow!great"),
+            "Wow!great"
+        )
+    }
+
+    func testCleanTextIsUnchanged() {
+        let clean = "2 cups flour\n1/2 tsp salt\nMACROS: 43C\nSalt & pepper to taste"
+        XCTAssertEqual(RecipeTextHeuristics.repairExtractedText(clean), clean)
+    }
+
+    // MARK: - The Regression This Exists For
+
+    func testRepairLetsBoundaryDetectionFindRecipeStarts() {
+        // The real failure: `splitIntoRecipeChunks` keys on "MACROS:" to find
+        // where a recipe begins. With colons corrupted to "&", no page scored
+        // as a recipe start, so a three-recipe cookbook imported as ONE
+        // merged recipe.
+        // Comfortably over the 100-character floor `splitIntoRecipeChunks`
+        // uses to discard cover and contents pages.
+        let page = """
+        Ingredients
+        • 1 LB FROZEN MEDIUM SHRIMP, DEVEINED WITH TAILS OFF
+        • 10OZ FARFALLE PASTA (UNCOOKED)
+        • 2 TBSP BUTTER
+        • 1 GARLIC CLOVE, MINCED
+        MACROS& 43C 13F 38P PER SERVING
+        CALORIES& 444 PER SERVING
+        SERVINGS& 6
+        """
+        let corruptedChunks = RecipeTextHeuristics.splitIntoRecipeChunks(
+            pageTexts: [page, page, page]
+        )
+        XCTAssertEqual(corruptedChunks.count, 1, "precondition: corrupted pages merge into one")
+
+        let repairedChunks = RecipeTextHeuristics.splitIntoRecipeChunks(
+            pageTexts: [page, page, page].map(RecipeTextHeuristics.repairExtractedText)
+        )
+        XCTAssertEqual(repairedChunks.count, 3, "repaired pages split into three recipes")
+    }
+}

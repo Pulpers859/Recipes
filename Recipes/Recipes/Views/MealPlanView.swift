@@ -46,6 +46,37 @@ struct MealPlanView: View {
         }
     }
 
+    /// Recipe categories that belong in a given meal slot.
+    ///
+    /// Deliberately NOT a strict filter. Hiding everything else would make the
+    /// most ordinary meal-planning move there is — last night's dinner as
+    /// today's lunch — impossible without recategorizing the recipe. So these
+    /// recipes are promoted to the top of the picker and the rest stay
+    /// reachable underneath.
+    private static func categories(matching slot: MealSlot) -> Set<RecipeCategory> {
+        switch slot {
+        case .breakfast: return [.breakfast, .bread]
+        case .lunch: return [.lunch, .soup, .salad, .side]
+        case .dinner: return [.dinner, .soup, .salad, .side]
+        case .snack: return [.snack, .appetizer, .dessert]
+        }
+    }
+
+    /// Picker contents split into "fits this slot" and everything else.
+    /// While searching, the user is being explicit, so the split is dropped
+    /// and results stay in one flat list.
+    private var recipeChoiceSections: (suggested: [Recipe], others: [Recipe]) {
+        let choices = filteredRecipeChoices
+        guard recipeSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return (choices, [])
+        }
+        let wanted = Self.categories(matching: selectedSlot)
+        return (
+            choices.filter { wanted.contains($0.category) },
+            choices.filter { !wanted.contains($0.category) }
+        )
+    }
+
     private var recipePickerEmptyMessage: String {
         let query = recipeSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return "No recipes in your library yet." }
@@ -381,30 +412,21 @@ struct MealPlanView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .padding()
                 } else {
-                    List(filteredRecipeChoices) { recipe in
-                        Button {
-                            addEntry(recipe: recipe, slot: selectedSlot)
-                            recipeSearchText = ""
-                            showAddRecipe = false
-                        } label: {
-                            HStack {
-                                Image(systemName: recipe.category.icon)
-                                    .foregroundStyle(Color.rvAccent)
-                                VStack(alignment: .leading) {
-                                    Text(recipe.title)
-                                        .font(.subheadline.weight(.medium))
-                                        .lineLimit(nil)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                    if recipe.totalTime > 0 {
-                                        Text("\(recipe.totalTime) min")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
+                    let sections = recipeChoiceSections
+                    List {
+                        if sections.others.isEmpty {
+                            // Searching, or nothing to demote — one flat list.
+                            ForEach(sections.suggested) { recipeChoiceRow($0) }
+                        } else {
+                            if !sections.suggested.isEmpty {
+                                Section("For \(selectedSlot.displayName)") {
+                                    ForEach(sections.suggested) { recipeChoiceRow($0) }
                                 }
                             }
+                            Section(sections.suggested.isEmpty ? "All Recipes" : "Everything Else") {
+                                ForEach(sections.others) { recipeChoiceRow($0) }
+                            }
                         }
-                        .foregroundStyle(Color.rvInk)
-                        .listRowBackground(Color.rvPaper)
                     }
                 }
             }
@@ -425,6 +447,32 @@ struct MealPlanView: View {
             .searchable(text: $recipeSearchText, prompt: "Search recipes...")
         }
         .presentationDetents([.medium, .large])
+    }
+
+    private func recipeChoiceRow(_ recipe: Recipe) -> some View {
+        Button {
+            addEntry(recipe: recipe, slot: selectedSlot)
+            recipeSearchText = ""
+            showAddRecipe = false
+        } label: {
+            HStack {
+                Image(systemName: recipe.category.icon)
+                    .foregroundStyle(Color.rvAccent)
+                VStack(alignment: .leading) {
+                    Text(recipe.title)
+                        .font(.subheadline.weight(.medium))
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if recipe.totalTime > 0 {
+                        Text("\(recipe.totalTime) min")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .foregroundStyle(Color.rvInk)
+        .listRowBackground(Color.rvPaper)
     }
 
     private func addEntry(recipe: Recipe, slot: MealSlot) {

@@ -176,7 +176,11 @@ class RecipeParserService: ObservableObject {
         var pages: [String] = []
         for i in 0..<document.pageCount {
             let text = document.page(at: i)?.string ?? ""
-            pages.append(text)
+            // Repair subsetted-font corruption BEFORE anything reads this
+            // text. Boundary detection keys on "MACROS:", and the AI prompt
+            // gets the same string, so fixing it once here is what keeps both
+            // the split and the quantities correct.
+            pages.append(RecipeTextHeuristics.repairExtractedText(text))
         }
         return pages
     }
