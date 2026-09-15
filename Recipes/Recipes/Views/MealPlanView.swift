@@ -407,7 +407,11 @@ struct MealPlanView: View {
             Group {
                 if filteredRecipeChoices.isEmpty {
                     VStack(spacing: 12) {
-                        Image(systemName: recipeSearchText.isEmpty ? "book.closed" : "magnifyingglass")
+                        // Trimmed to agree with `recipePickerEmptyMessage`,
+                        // which also trims — a whitespace-only query used to
+                        // pair a search icon with "no recipes yet".
+                        Image(systemName: recipeSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                              ? "book.closed" : "magnifyingglass")
                             .font(.system(size: 36))
                             .foregroundStyle(Color.rvAccent.opacity(0.6))
                         Text(recipePickerEmptyMessage)

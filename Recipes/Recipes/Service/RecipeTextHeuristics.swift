@@ -44,10 +44,18 @@ nonisolated enum RecipeTextHeuristics {
     /// ligature survives is simply unknown. No rule is guessed for a glyph
     /// that was not observed — inventing one risks corrupting good text.
     ///
-    /// The ligature rules are the least certain of the set, because a digit
-    /// may legitimately precede one ("8!OZ" is 8 fl oz) and that blocks the
-    /// obvious guard. `!` followed by a single capital is therefore left
-    /// alone; two capitals are required. See the rule comments below.
+    /// Two known false-positive shapes are accepted rather than fixed, because
+    /// closing them would cost observed repairs:
+    ///
+    /// - A nutrition table with `PROTEIN% FAT% CARB%` column headers becomes
+    ///   `PROTEIN: FAT: CARB:`. Restricting the label rule to known heading
+    ///   words would fix it but would also drop `CAJUN SEASONING&`, a real
+    ///   repair in the source file.
+    /// - A percent-encoded URL whose escape is an all-letter hex pair
+    ///   (`%EF%BB%BF`) is mangled. See the rule comment below.
+    ///
+    /// Both damage page furniture rather than quantities, which is the trade
+    /// being made.
     ///
     /// Also unhandled by design: a corrupted label with no space after it
     /// ("MACROS&43C"). `recipeStartSupportRegexes` accepts the raw glyphs as a
@@ -91,19 +99,25 @@ nonisolated enum RecipeTextHeuristics {
         // survives: the source writes ingredients in caps, where "!OUR" must
         // become "FLOUR", not "flOUR".
         //
-        // The lookbehind excludes "!" as well as letters. A doubled
-        // exclamation is emphatic prose, not a ligature, and PDF extraction
-        // routinely drops the space after it — without that, "Wow!!great"
-        // became "Wow!flgreat", and running this function twice gave a
-        // different answer than running it once.
+        // The lookbehind excludes "!" and digits as well as letters.
         //
-        // The uppercase rule demands TWO capitals because one is ambiguous: a
-        // digit may precede a real ligature ("8!OZ MILK" is 8 fl oz), so the
-        // lookbehind cannot exclude digits, which left "Serves 4!Enjoy"
-        // turning into "Serves 4FLEnjoy". "!OZ" and "!OUR" pass; "!Enjoy"
-        // does not.
-        (#"(?<![\p{L}!])!(?=\p{Ll})"#, "fl"),
-        (#"(?<![\p{L}!])!(?=\p{Lu}\p{Lu})"#, "FL"),
+        // "!" — a doubled exclamation is emphatic prose, not a ligature, and
+        // PDF extraction routinely drops the space after it. Without this,
+        // "!!a" became "!fla" and then "flfla" on a second pass.
+        //
+        // Digits — a yield line that lost its space ("SERVES 4!ENJOY",
+        // "Makes 12!store in fridge") is the realistic false positive, and
+        // every one of them has a digit before the "!". No digit-preceded
+        // ligature appears anywhere in the source document, so excluding them
+        // costs nothing observed.
+        //
+        // Two capitals on the uppercase rule is belt-and-braces on top of
+        // that, catching "word. !Enjoy" shapes the digit guard can't see.
+        // Real FL-words (FLOUR, FLAT, FLAX) all have two letters following,
+        // and a standalone "FL OZ" corrupts to "! OZ" — a space follows, so
+        // no version of this rule ever caught it. The recall cost is nil.
+        (#"(?<![\p{L}!\d])!(?=\p{Ll})"#, "fl"),
+        (#"(?<![\p{L}!\d])!(?=\p{Lu}\p{Lu})"#, "FL"),
         // "1 1%3 CUP" -> "1 1/3 CUP", "(93%7)" -> "(93/7)". Digits required on
         // BOTH sides, so a real percentage ("2% PLAIN GREEK YOGURT",
         // "93% lean") is never touched — those are followed by a space or the
@@ -123,7 +137,8 @@ nonisolated enum RecipeTextHeuristics {
         // The veto is narrow on purpose. `(?=\p{L})` already requires a letter
         // at that position, so the only encodings reachable here start with a
         // hex LETTER; the veto rejects those whose second character is a digit
-        // (%C3, %A9, %E4 — the common UTF-8 lead bytes). Rejecting any two hex
+        // (%C3 and %E4 are common UTF-8 lead bytes, %A9 a continuation byte).
+        // Rejecting any two hex
         // characters instead would also swallow "CHICKEN%BEEF", "RICE%BEANS"
         // and "SALT%BACON", since B/E/A/C/D/F are hex, and food words are far
         // likelier here than URLs.

@@ -16,7 +16,7 @@ import XCTest
 @MainActor
 final class GoldenCorpusTests: XCTestCase {
 
-    // MARK: - Baselines (measured 2026-07-17; see header for the update rule)
+    // MARK: - Baselines (measured 2026-07-17; split re-measured 2026-09-15; see header for the update rule)
     //
     // Measured: ingredient F1 0.8500, step F1 0.9844, title 1.0, amount 1.0
     // (60 pairs), split 0.8889 (8/9 since s09-corrupted-font-subset joined the
@@ -66,7 +66,7 @@ final class GoldenCorpusTests: XCTestCase {
         // Repo layout: the corpus deliberately lives OUTSIDE the
         // file-synchronized RecipeVaultTests folder (at Recipes/GoldenCorpus).
         // Synchronized groups copy resource files flat into the test bundle,
-        // so 24 files all named input.txt break the build with "Multiple
+        // so 25 files all named input.txt break the build with "Multiple
         // commands produce" if the corpus sits inside the target.
         return testFileDirectory
             .deletingLastPathComponent()
@@ -134,9 +134,9 @@ final class GoldenCorpusTests: XCTestCase {
 
         // Guard against the corpus silently shrinking (deleted/unreadable
         // folders would otherwise inflate the averages).
-        XCTAssertGreaterThanOrEqual(corpus.count, 24, "golden corpus lost cases")
+        XCTAssertGreaterThanOrEqual(corpus.count, 25, "golden corpus lost cases")
         XCTAssertGreaterThanOrEqual(manualCases.count, 16)
-        XCTAssertGreaterThanOrEqual(splitCases.count, 8)
+        XCTAssertGreaterThanOrEqual(splitCases.count, 9)
 
         var ingredientF1s: [Double] = []
         var stepF1s: [Double] = []

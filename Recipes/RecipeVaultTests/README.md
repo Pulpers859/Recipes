@@ -10,6 +10,7 @@ Unit tests for the hand-tuned heuristics most likely to regress when tweaked:
 - `JSONPayloadExtractorTests` — extracting JSON from AI responses (fences, prose, arrays)
 - `MealPlanningServiceTests` — week semantics and shopping-list aggregation
 - `BackupSnapshotTests` — safety-snapshot filenames, pruning, legacy migration
+- `RecipeTextRepairTests` — undoing PDF subsetted-font character corruption (`fl` as `!`, `/` as `%`, `:` as `&`), including the guards that keep legitimate text intact
 - `GoldenCorpusTests` — scored regression gate over `GoldenCorpus/` (see below)
 - `ShareInboxTests` — share-extension inbox protocol (payload-then-envelope commit, non-destructive reads, size/count caps)
 
@@ -17,7 +18,7 @@ Unit tests for the hand-tuned heuristics most likely to regress when tweaked:
 
 `Recipes/GoldenCorpus/` (one level up — deliberately OUTSIDE this
 file-synchronized folder, because Xcode copies synchronized-group resources
-flat into the test bundle and 24 files named `input.txt` collide) holds
+flat into the test bundle and 25 files named `input.txt` collide) holds
 document-level parsing cases: each folder has an
 `input.txt` (raw recipe text; split cases delimit pages with `<<<PAGE>>>`
 lines) and an `expected.json` with hand-authored ground truth.

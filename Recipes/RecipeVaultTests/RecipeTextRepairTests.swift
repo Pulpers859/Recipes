@@ -110,7 +110,7 @@ final class RecipeTextRepairTests: XCTestCase {
             "!!a",
             "Wow!!great",
             "WOW!!!Amazing",
-            "8!OZ MILK",
+            "SERVES 4!ENJOY",
             "MACROS&43C"
         ]
         for sample in samples {
@@ -182,17 +182,27 @@ final class RecipeTextRepairTests: XCTestCase {
             "Delicious!!Enjoy"
         )
         XCTAssertEqual(RecipeTextHeuristics.repairExtractedText("WOW!!!Amazing"), "WOW!!!Amazing")
-        // A digit may precede a REAL ligature, so the guard can't exclude
-        // digits; one capital after "!" is therefore not enough to trigger it.
+    }
+
+    func testYieldLinesAreNotMistakenForLigatures() {
+        // A yield line that lost its space is the realistic false positive,
+        // and every shape of it has a digit before the "!". An earlier
+        // version guarded only against Title case, so the all-caps and
+        // lowercase forms — the ones this document family actually uses —
+        // still corrupted.
         XCTAssertEqual(
             RecipeTextHeuristics.repairExtractedText("Serves 4!Enjoy your meal"),
             "Serves 4!Enjoy your meal"
         )
-    }
-
-    func testDigitPrecededLigatureStillRepairs() {
-        // The true positive the digit guard would have cost: 8 fl oz.
-        XCTAssertEqual(RecipeTextHeuristics.repairExtractedText("8!OZ MILK"), "8FLOZ MILK")
+        XCTAssertEqual(RecipeTextHeuristics.repairExtractedText("SERVES 4!ENJOY"), "SERVES 4!ENJOY")
+        XCTAssertEqual(
+            RecipeTextHeuristics.repairExtractedText("Makes 12!store in fridge"),
+            "Makes 12!store in fridge"
+        )
+        XCTAssertEqual(
+            RecipeTextHeuristics.repairExtractedText("Yield 8!servings"),
+            "Yield 8!servings"
+        )
     }
 
     func testCleanTextIsUnchanged() {
