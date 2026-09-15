@@ -41,7 +41,13 @@ class ShoppingListService {
                 // discovering you needed more is the failure that costs a
                 // second trip, while the surplus keeps. `amount` stays the low
                 // end everywhere else — this is the one place that opts out.
-                let purchaseAmount = ingredient.amountMax ?? ingredient.amount
+                //
+                // `max` rather than `??`: a stored maximum below the minimum
+                // would otherwise put the SMALLER number on the list, which is
+                // the exact failure this rule exists to prevent. Normalization
+                // should keep that from being reachable, but under-buying is
+                // not the way to find out it slipped.
+                let purchaseAmount = max(ingredient.amount, ingredient.amountMax ?? 0)
 
                 // Combine amounts only when the units are actually
                 // compatible. When they aren't ("2 cup flour" vs "500 g

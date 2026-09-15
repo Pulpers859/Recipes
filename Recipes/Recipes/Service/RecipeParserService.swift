@@ -260,7 +260,7 @@ class RecipeParserService: ObservableObject {
           "difficulty": "medium",
           "tags": ["pasta", "quick"],
           "ingredients": [
-            {"name": "spaghetti", "amount": 1.0, "unit": "lb", "section": "", "isOptional": false}
+            {"name": "spaghetti", "amount": 1.0, "amountMax": null, "unit": "lb", "section": "", "isOptional": false}
           ],
           "steps": [
             {"order": 1, "instruction": "Boil water...", "timerSeconds": null, "timerLabel": null}
@@ -271,6 +271,7 @@ class RecipeParserService: ObservableObject {
         - category must be one of: breakfast, lunch, dinner, appetizer, snack, dessert, beverage, sauce, bread, soup, salad, side, other
         - difficulty must be one of: easy, medium, hard, expert
         - amounts should be decimals (0.5 not 1/2). For gram amounts like "150G", use amount: 150 and unit: "g"
+        - if the recipe gives a RANGE ("1-1.5 lbs", "8 to 12 tortillas"), put the low end in amount and the high end in amountMax; otherwise leave amountMax null
         - If a step involves waiting/cooking time, include timerSeconds and timerLabel
         - section groups related ingredients (e.g. "Sauce", "Icing") — leave empty if not applicable
         - Ignore social media handles, page numbers, watermarks, and navigation text like "BACK TO CONTENTS"
@@ -350,7 +351,7 @@ class RecipeParserService: ObservableObject {
             "difficulty": "easy",
             "tags": [],
             "ingredients": [
-              {"name": "ingredient", "amount": 1.0, "unit": "cup", "section": "", "isOptional": false}
+              {"name": "ingredient", "amount": 1.0, "amountMax": null, "unit": "cup", "section": "", "isOptional": false}
             ],
             "steps": [
               {"order": 1, "instruction": "Step text", "timerSeconds": null, "timerLabel": null}

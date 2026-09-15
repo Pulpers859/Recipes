@@ -55,9 +55,11 @@ enum IngredientLineParser {
         // a second token — captured SEPARATELY so "1-1.5 lb" keeps both ends
         // instead of collapsing to the midpoint.
         //
-        // The separators require surrounding whitespace for "to"/"or" so they
-        // can't match inside a word ("1 tablespoon" must not see "to"), while
-        // the hyphen form allows none ("2-3 cups"). Size qualifiers like
+        // What keeps "to" out of "tablespoon" is that the separator must
+        // directly follow the first number token AND be followed by a second
+        // one — the surrounding-whitespace requirement is belt-and-braces on
+        // top of that, so don't relax the anchoring on its strength. Size
+        // qualifiers like
         // "1 400g can" and "1 28-oz can" still keep their text in the name,
         // because the separator has to be immediately followed by a number.
         // The \b after the unit prevents short units from eating the start of

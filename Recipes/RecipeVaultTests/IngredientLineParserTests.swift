@@ -87,8 +87,11 @@ final class IngredientLineParserTests: XCTestCase {
 
     func testEnDashRange() {
         // En dashes are what most CMSs emit; only ASCII "-" used to parse.
+        // This is a RANGE like any other — it used to assert the 0.375
+        // midpoint, which is what ranges no longer collapse to.
         let ing = IngredientLineParser.parse("¼–½ tsp cayenne pepper")
-        XCTAssertEqual(ing.amount, 0.375, accuracy: 0.001)
+        XCTAssertEqual(ing.amount, 0.25, accuracy: 0.001)
+        XCTAssertEqual(ing.amountMax ?? 0, 0.5, accuracy: 0.001)
         XCTAssertEqual(ing.unit.lowercased(), "tsp")
         XCTAssertEqual(ing.name, "cayenne pepper")
     }

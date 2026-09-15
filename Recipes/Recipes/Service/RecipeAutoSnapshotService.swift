@@ -86,7 +86,12 @@ enum RecipeAutoSnapshotService {
             digest.update(data: Data([0x1F]))
         }
 
-        feed("v1")
+        // Bumped when the digest's SHAPE changes, not just its inputs. Adding
+        // the ingredient amountMax segment already alters every existing
+        // recipe's digest, so the first backgrounding after this update writes
+        // one full auto-snapshot; the marker makes that expected rather than
+        // mysterious.
+        feed("v2")
         for recipe in recipes.sorted(by: { $0.id.uuidString < $1.id.uuidString }) {
             feed(recipe.id.uuidString)
             feed(recipe.title)

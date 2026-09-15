@@ -235,9 +235,9 @@ struct RecipeEditorView: View {
             Section("Ingredients") {
                 ForEach($ingredients) { $ingredient in
                     VStack(alignment: .leading, spacing: 8) {
-                        HStack(spacing: 12) {
+                        HStack(spacing: 8) {
                             TextField("Amount", text: ingredientAmountBinding($ingredient))
-                                .frame(maxWidth: 76)
+                                .frame(maxWidth: 64)
                                 .keyboardType(.decimalPad)
                                 .accessibilityLabel("Ingredient amount")
 
@@ -248,12 +248,12 @@ struct RecipeEditorView: View {
                                 .foregroundStyle(Color.rvSubtleText)
 
                             TextField("Max", text: ingredientAmountMaxBinding($ingredient))
-                                .frame(maxWidth: 76)
+                                .frame(maxWidth: 64)
                                 .keyboardType(.decimalPad)
                                 .accessibilityLabel("Ingredient maximum amount, optional")
 
                             TextField("Unit", text: $ingredient.unit)
-                                .frame(maxWidth: 110)
+                                .frame(maxWidth: 96)
                                 .accessibilityLabel("Ingredient unit")
                         }
 
@@ -435,8 +435,14 @@ struct RecipeEditorView: View {
     }
 
     /// Empty text means "no range", which is different from zero — so this
-    /// writes `nil` rather than 0, and refuses to store a maximum that isn't
-    /// above the minimum (which would render as a backwards "3–2").
+    /// writes `nil` rather than 0.
+    ///
+    /// It deliberately does NOT reject a maximum below the minimum. Validating
+    /// that here fought the keyboard: with a minimum of 1, typing "1.5" was
+    /// rejected at the intermediate "1", the getter then rendered "" and the
+    /// field blanked mid-word, so the range in this feature's own headline
+    /// example could not be typed at all. Ordering is settled once, on save,
+    /// by `Ingredient.normalizedList`.
     private func ingredientAmountMaxBinding(_ ingredient: Binding<Ingredient>) -> Binding<String> {
         Binding(
             get: {
@@ -449,7 +455,7 @@ struct RecipeEditorView: View {
                     ingredient.wrappedValue.amountMax = nil
                     return
                 }
-                ingredient.wrappedValue.amountMax = value > ingredient.wrappedValue.amount ? value : nil
+                ingredient.wrappedValue.amountMax = value
             }
         )
     }

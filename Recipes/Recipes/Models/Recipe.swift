@@ -141,11 +141,6 @@ struct Ingredient: Codable, Hashable, Identifiable {
         return low.isEmpty ? high : "\(low)–\(high)"
     }
 
-    var hasRange: Bool {
-        guard let amountMax else { return false }
-        return amountMax > amount
-    }
-
     var displayString: String {
         let amtStr = amountDisplay
         if amount == 0 && amountMax == nil && unit.isEmpty { return name }
@@ -181,7 +176,13 @@ struct Ingredient: Codable, Hashable, Identifiable {
                 Ingredient(
                     name: trimmedName,
                     amount: ingredient.amount,
-                    amountMax: ingredient.amountMax,
+                    // The single choke point where an upper bound is validated
+                    // against its lower one. Every save path funnels through
+                    // here — the editor, AI import, and scaling — so editing
+                    // the minimum above a previously-set maximum resolves to
+                    // "no range" rather than persisting a backwards one that
+                    // the display silently hides.
+                    amountMax: ingredient.amountMax.flatMap { $0 > ingredient.amount ? $0 : nil },
                     unit: trimmedUnit,
                     section: explicitSection.isEmpty ? currentSection : explicitSection,
                     isOptional: ingredient.isOptional

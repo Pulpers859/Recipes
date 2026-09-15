@@ -105,7 +105,16 @@ struct AIParsedRecipe: Decodable {
             name = try c.decode(String.self, forKey: .name)
             if let value = try? c.decode(Double.self, forKey: .amount) {
                 amount = value
-                amountMax = nil
+                // A numeric amount can still carry a separate upper bound,
+                // which is the shape the prompts ask for.
+                if let maxValue = try? c.decodeIfPresent(Double.self, forKey: .amountMax) {
+                    amountMax = maxValue
+                } else if let maxText = try? c.decodeIfPresent(String.self, forKey: .amountMax) {
+                    let parsedMax = IngredientLineParser.parseAmountRange(maxText).amount
+                    amountMax = parsedMax > 0 ? parsedMax : nil
+                } else {
+                    amountMax = nil
+                }
             } else if let text = try? c.decode(String.self, forKey: .amount) {
                 // "1/2", "1 1/2", "0.5" — and "1-1.5" or "8 to 12", which the
                 // model emits as a string because JSON has no range type.
