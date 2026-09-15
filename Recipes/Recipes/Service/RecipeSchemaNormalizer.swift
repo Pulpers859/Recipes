@@ -2,7 +2,12 @@ import Foundation
 
 /// Normalizes the loose, publisher-specific values found in schema.org Recipe
 /// JSON-LD into stable Recipe Vault fields.
-enum RecipeSchemaNormalizer {
+/// `nonisolated` because this is pure schema.org string normalization with no
+/// UI or actor state. Without it the type picks up the project's MainActor
+/// default isolation, and passing `normalizedLabel` as a function value to
+/// `map` from a synchronous nonisolated context warns — an error under the
+/// Swift 6 language mode. Same reasoning as `RecipeTextHeuristics`.
+nonisolated enum RecipeSchemaNormalizer {
     static func category(from candidates: [String]) -> RecipeCategory {
         let cleaned = candidates.map(normalizedLabel).filter { !$0.isEmpty }
 

@@ -585,7 +585,7 @@ class RecipeExportService {
 
 // MARK: - Codable Types
 
-private struct ExportWrapper: Codable {
+private nonisolated struct ExportWrapper: Codable {
     let version: Int
     let exportDate: Date
     let recipeCount: Int
@@ -649,7 +649,7 @@ enum ImportError: LocalizedError {
     }
 }
 
-fileprivate struct ExportableRecipe: Codable {
+fileprivate nonisolated struct ExportableRecipe: Codable {
     var recipeID: UUID?
     let title: String
     let summary: String
@@ -677,6 +677,7 @@ fileprivate struct ExportableRecipe: Codable {
 }
 
 extension ExportableRecipe {
+    @MainActor
     init(from recipe: Recipe) {
         self.init(
             recipeID: recipe.id,
@@ -705,7 +706,7 @@ extension ExportableRecipe {
     }
 }
 
-fileprivate struct ExportablePantryItem: Codable {
+fileprivate nonisolated struct ExportablePantryItem: Codable {
     var id: UUID?
     let name: String
     let amount: Double
@@ -714,6 +715,7 @@ fileprivate struct ExportablePantryItem: Codable {
     let isStaple: Bool
     let dateUpdated: Date?
 
+    @MainActor
     init(from item: PantryItem) {
         self.id = item.id
         self.name = item.name
@@ -725,7 +727,7 @@ fileprivate struct ExportablePantryItem: Codable {
     }
 }
 
-fileprivate struct ExportableShoppingItem: Codable {
+fileprivate nonisolated struct ExportableShoppingItem: Codable {
     var id: UUID?
     let name: String
     let amount: Double
@@ -737,6 +739,7 @@ fileprivate struct ExportableShoppingItem: Codable {
     let pantryReductionAmount: Double?
     let dateAdded: Date?
 
+    @MainActor
     init(from item: ShoppingItem) {
         self.id = item.id
         self.name = item.name
@@ -751,12 +754,13 @@ fileprivate struct ExportableShoppingItem: Codable {
     }
 }
 
-fileprivate struct ExportableMealPlan: Codable {
+fileprivate nonisolated struct ExportableMealPlan: Codable {
     var id: UUID?
     let weekStartDate: Date
     let dateCreated: Date?
     let entries: [MealPlanEntry]
 
+    @MainActor
     init(from plan: MealPlan) {
         self.id = plan.id
         self.weekStartDate = plan.weekStartDate

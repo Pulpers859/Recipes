@@ -106,7 +106,11 @@ enum RecipeAutoSnapshotService {
             feed("\(recipe.servings)|\(recipe.prepTime)|\(recipe.cookTime)|\(recipe.rating)|\(recipe.isFavorite)|\(recipe.timesCooked)")
             feed(recipe.dateLastCooked.map { "\($0.timeIntervalSince1970)" } ?? "")
             for ingredient in recipe.ingredients {
-                feed("\(ingredient.name)|\(ingredient.amount)|\(ingredient.amountMax.map(String.init) ?? "")|\(ingredient.unit)|\(ingredient.section)|\(ingredient.isOptional)")
+                // Bound out rather than inlined: `String.init` is overloaded
+                // enough that `.map(String.init)` inside an interpolation with
+                // a `??` fallback is genuinely ambiguous to the type checker.
+                let maxSegment = ingredient.amountMax.map { "\($0)" } ?? ""
+                feed("\(ingredient.name)|\(ingredient.amount)|\(maxSegment)|\(ingredient.unit)|\(ingredient.section)|\(ingredient.isOptional)")
             }
             for step in recipe.steps.sorted(by: { $0.order < $1.order }) {
                 feed("\(step.order)|\(step.instruction)|\(step.timerSeconds ?? -1)")

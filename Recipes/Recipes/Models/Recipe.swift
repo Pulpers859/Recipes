@@ -96,7 +96,7 @@ final class Recipe {
 
 // MARK: - Ingredient
 
-struct Ingredient: Codable, Hashable, Identifiable {
+nonisolated struct Ingredient: Codable, Hashable, Identifiable {
     var id: UUID = UUID()
     var name: String
     var amount: Double
@@ -246,7 +246,7 @@ struct Ingredient: Codable, Hashable, Identifiable {
 
 // MARK: - Recipe Step
 
-struct RecipeStep: Codable, Hashable, Identifiable {
+nonisolated struct RecipeStep: Codable, Hashable, Identifiable {
     var id: UUID = UUID()
     var order: Int
     var instruction: String
@@ -305,7 +305,9 @@ enum Difficulty: String, Codable, CaseIterable {
     }
 }
 
-enum AmountFormatter {
+/// `nonisolated` so `Ingredient.amountDisplay` — itself nonisolated — can
+/// format without hopping to the main actor.
+nonisolated enum AmountFormatter {
     static func format(_ value: Double) -> String {
         if value == 0 { return "" }
         if value.truncatingRemainder(dividingBy: 1) == 0 {

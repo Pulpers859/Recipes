@@ -21,7 +21,7 @@ final class MealPlan {
     }
 }
 
-struct MealPlanEntry: Codable, Hashable, Identifiable {
+nonisolated struct MealPlanEntry: Codable, Hashable, Identifiable {
     static let shortDayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 
     var id: UUID = UUID()
@@ -37,7 +37,7 @@ struct MealPlanEntry: Codable, Hashable, Identifiable {
     }
 }
 
-enum MealSlot: String, Codable, CaseIterable {
+nonisolated enum MealSlot: String, Codable, CaseIterable {
     case breakfast, lunch, dinner, snack
     var displayName: String { rawValue.capitalized }
     var icon: String {
