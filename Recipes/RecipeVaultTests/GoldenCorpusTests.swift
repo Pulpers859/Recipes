@@ -145,7 +145,15 @@ final class GoldenCorpusTests: XCTestCase {
 
         for corpusCase in manualCases {
             let expected = corpusCase.expected
-            let recipe = RecipeTextHeuristics.manualParse(text: corpusCase.input, pdfData: nil)
+            // Repair first, mirroring production: `RecipeParserService` runs
+            // this over every page before either heuristic sees it, so a
+            // corpus that skipped it would be scoring a pipeline that doesn't
+            // ship. It is a no-op on every current case (none contain the
+            // characters it touches), so baselines are unaffected.
+            let recipe = RecipeTextHeuristics.manualParse(
+                text: RecipeTextHeuristics.repairExtractedText(corpusCase.input),
+                pdfData: nil
+            )
 
             let predictedNames = recipe.ingredients.map { normalized($0.name) }
             let expectedNames = (expected.ingredients ?? []).map { normalized($0.name) }
@@ -183,8 +191,10 @@ final class GoldenCorpusTests: XCTestCase {
 
         var splitHits = 0
         for corpusCase in splitCases {
+            // Repaired per page, mirroring production (see the manual cases
+            // above for why).
             let pages = corpusCase.input.components(separatedBy: "<<<PAGE>>>")
-                .map { $0.trimmingCharacters(in: .newlines) }
+                .map { RecipeTextHeuristics.repairExtractedText($0.trimmingCharacters(in: .newlines)) }
             let chunks = RecipeTextHeuristics.splitIntoRecipeChunks(pageTexts: pages)
             let expectedCount = corpusCase.expected.expectedChunkCount ?? -1
             let markers = corpusCase.expected.chunkMarkers ?? []

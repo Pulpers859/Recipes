@@ -72,6 +72,19 @@ class RecipeParserService: ObservableObject {
             }
         }
 
+        // Repair subsetted-font corruption here, AFTER the OCR merge, so that
+        // every page is covered however its text was obtained. Two reasons it
+        // can't live in `extractTextByPage`: OCR replaces those pages
+        // wholesale a few lines above, and the thin-page threshold must judge
+        // the raw extracted text it was tuned against — the `!` -> `fl` rule
+        // lengthens strings, which could otherwise nudge a 39-character page
+        // past the cutoff and skip OCR it needed.
+        //
+        // Everything downstream reads the repaired text: boundary detection
+        // keys on "MACROS:", and the AI prompt gets the same string, so one
+        // pass here is what keeps both the split and the quantities correct.
+        pageTexts = pageTexts.map(RecipeTextHeuristics.repairExtractedText)
+
         let allText = pageTexts.joined(separator: "\n")
         if allText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             throw ParserError.ocrFailed
@@ -176,11 +189,7 @@ class RecipeParserService: ObservableObject {
         var pages: [String] = []
         for i in 0..<document.pageCount {
             let text = document.page(at: i)?.string ?? ""
-            // Repair subsetted-font corruption BEFORE anything reads this
-            // text. Boundary detection keys on "MACROS:", and the AI prompt
-            // gets the same string, so fixing it once here is what keeps both
-            // the split and the quantities correct.
-            pages.append(RecipeTextHeuristics.repairExtractedText(text))
+            pages.append(text)
         }
         return pages
     }

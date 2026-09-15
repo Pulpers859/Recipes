@@ -27,10 +27,17 @@ nonisolated enum RecipeTextHeuristics {
     /// which is the thing this app most has to get right — "1 1%3 CUP" is not
     /// a number anyone can shop from.
     ///
-    /// Every rule is deliberately guarded so legitimate text survives. On the
-    /// source file these were derived from, they correct 17 occurrences and
-    /// leave all 12 genuine uses (`2% plain greek yogurt`, `GARLIC POWDER &
-    /// SALT`, `LUNCH & DINNER`) untouched.
+    /// Every rule is guarded so legitimate text survives. Measured on the
+    /// source file these were derived from (a macro-style cookbook export),
+    /// they correct 38 occurrences and leave every genuine use untouched —
+    /// `2% PLAIN GREEK YOGURT`, `GARLIC POWDER & SALT`, `LUNCH & DINNER`,
+    /// `Stroganoff`, and the one real exclamation in the file (`enjoy!`).
+    ///
+    /// Scope, so nobody reads more into this than it earned: only `fl` was
+    /// observed corrupted. `ff` came through intact in the same file
+    /// ("Stroganoff"), and no lowercase `fi` word appeared, so whether that
+    /// ligature survives is simply unknown. No rule is guessed for a glyph
+    /// that was not observed — inventing one risks corrupting good text.
     static func repairExtractedText(_ text: String) -> String {
         var repaired = text
         for rule in repairRules {
@@ -43,14 +50,30 @@ nonisolated enum RecipeTextHeuristics {
         return repaired
     }
 
+    /// Order matters: the label-colon rule must run before the word-slash
+    /// rule, or "MACROS% 43C" would be rewritten to a slash and stop looking
+    /// like a recipe heading.
+    ///
+    /// Templates here are plain literals on purpose. These go through
+    /// `NSRegularExpression` template semantics, where `$` and `\` are
+    /// special — any future rule whose replacement contains either must
+    /// escape it.
     private static let repairRules: [(pattern: String, template: String)] = [
-        // "1 1%3 CUP" -> "1 1/3 CUP". Digits required on BOTH sides, so a real
-        // percentage ("2% plain greek yogurt", "93% lean") is never touched —
-        // those are always followed by a space or end of word.
+        // "1 1%3 CUP" -> "1 1/3 CUP", "(93%7)" -> "(93/7)". Digits required on
+        // BOTH sides, so a real percentage ("2% PLAIN GREEK YOGURT",
+        // "93% lean") is never touched — those are followed by a space or the
+        // end of the word.
         (#"(?<=\d)%(?=\d)"#, "/"),
-        // "GARLIC SALT%PEPPER" -> "GARLIC SALT/PEPPER". A percent wedged
-        // between two letters with no spaces is never legitimate prose.
-        (#"(?<=\p{L})%(?=\p{L})"#, "/"),
+        // "MACROS% 43C" -> "MACROS: 43C". The other corruption family: some
+        // files render ':' as '%' rather than '&'. `recipeStartSupportRegexes`
+        // below tolerates a bare '%' for exactly this reason; repairing it
+        // here is the fix that pattern was standing in for.
+        (#"(?<=\p{L})%(?=\s)"#, ":"),
+        // "GARLIC SALT%PEPPER" -> "GARLIC SALT/PEPPER". A percent between two
+        // letters is overwhelmingly a corrupted slash, though not
+        // unconditionally: percent-encoding ("caf%C3%A9") looks the same, so
+        // two hex digits after the percent veto the repair.
+        (#"(?<=\p{L})%(?![0-9A-Fa-f]{2})(?=\p{L})"#, "/"),
         // "MACROS& 43C" -> "MACROS: 43C". A letter before and whitespace after
         // is the signature of a corrupted colon; it leaves "GARLIC POWDER &
         // SALT", "LUNCH & DINNER", "M&M" and "AT&T" alone, since those all
@@ -58,7 +81,8 @@ nonisolated enum RecipeTextHeuristics {
         (#"(?<=\p{L})&(?=\s|$)"#, ":"),
         // "!our" -> "flour". "!" never legally appears at the START of a word,
         // so a "!" that opens one is the fl ligature glyph. Requiring a
-        // non-letter before it keeps real exclamations ("Wow!great") intact.
+        // non-letter before it keeps real exclamations ("enjoy!", "Wow!great")
+        // intact.
         (#"(?<!\p{L})!(?=\p{Ll})"#, "fl"),
     ]
 

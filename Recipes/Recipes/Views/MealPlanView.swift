@@ -127,7 +127,13 @@ struct MealPlanView: View {
                     .disabled((currentPlan?.entries.isEmpty ?? true) || allRecipes.isEmpty)
                 }
             }
-            .sheet(isPresented: $showAddRecipe) {
+            // Clearing the query on dismissal has to happen HERE, not in the
+            // Cancel button: a swipe-to-dismiss runs neither the button nor
+            // the row tap, and a leftover query survives in @State. Since a
+            // non-empty query deliberately collapses the slot ranking into one
+            // flat list, a stale one silently disables that ranking the next
+            // time the sheet opens.
+            .sheet(isPresented: $showAddRecipe, onDismiss: { recipeSearchText = "" }) {
                 recipePickerSheet
             }
             .alert("Shopping List Generated", isPresented: $showShoppingConfirmation) {
@@ -438,8 +444,9 @@ struct MealPlanView: View {
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
+                    // The query is cleared by the sheet's onDismiss, which
+                    // covers this path too.
                     Button("Cancel") {
-                        recipeSearchText = ""
                         showAddRecipe = false
                     }
                 }
@@ -452,7 +459,6 @@ struct MealPlanView: View {
     private func recipeChoiceRow(_ recipe: Recipe) -> some View {
         Button {
             addEntry(recipe: recipe, slot: selectedSlot)
-            recipeSearchText = ""
             showAddRecipe = false
         } label: {
             HStack {

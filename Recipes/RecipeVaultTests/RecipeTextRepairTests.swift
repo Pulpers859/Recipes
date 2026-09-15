@@ -42,6 +42,25 @@ final class RecipeTextRepairTests: XCTestCase {
         )
     }
 
+    func testLabelColonsCorruptedToPercentAreRestored() {
+        // The other corruption family: some files render ':' as '%'. Repairing
+        // it must win over the word-slash rule, or the heading stops looking
+        // like a recipe start.
+        XCTAssertEqual(
+            RecipeTextHeuristics.repairExtractedText("MACROS% 43C 13F 38P"),
+            "MACROS: 43C 13F 38P"
+        )
+    }
+
+    func testPercentEncodingIsNotMistakenForASlash() {
+        // "caf%C3%A9" has a letter on both sides of the first '%' and would
+        // otherwise be mangled; two hex digits after it veto the repair.
+        XCTAssertEqual(
+            RecipeTextHeuristics.repairExtractedText("from caf%C3%A9 kitchen"),
+            "from caf%C3%A9 kitchen"
+        )
+    }
+
     func testFlLigatureIsRestored() {
         XCTAssertEqual(
             RecipeTextHeuristics.repairExtractedText("Add 2 Tbsp !our and stir"),
@@ -81,6 +100,12 @@ final class RecipeTextRepairTests: XCTestCase {
     }
 
     func testRealExclamationsAreNotTouched() {
+        // "enjoy!" is the one real exclamation in the source file, and it sits
+        // three lines from a corrupted "!our".
+        XCTAssertEqual(
+            RecipeTextHeuristics.repairExtractedText("Add queso over rice and enjoy!"),
+            "Add queso over rice and enjoy!"
+        )
         XCTAssertEqual(
             RecipeTextHeuristics.repairExtractedText("Enjoy! Serve warm."),
             "Enjoy! Serve warm."
