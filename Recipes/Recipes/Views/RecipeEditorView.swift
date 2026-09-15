@@ -6,6 +6,7 @@ import UIKit
 struct RecipeEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     
     var recipe: Recipe
     let isNewImport: Bool
@@ -235,26 +236,34 @@ struct RecipeEditorView: View {
             Section("Ingredients") {
                 ForEach($ingredients) { $ingredient in
                     VStack(alignment: .leading, spacing: 8) {
-                        HStack(spacing: 8) {
-                            TextField("Amount", text: ingredientAmountBinding($ingredient))
-                                .frame(maxWidth: 64)
-                                .keyboardType(.decimalPad)
-                                .accessibilityLabel("Ingredient amount")
+                        // Three fields don't fit one line at accessibility
+                        // text sizes — the fixed widths below are tuned for
+                        // default Dynamic Type and would truncate the
+                        // placeholders — so stack them instead of cramping.
+                        if dynamicTypeSize.isAccessibilitySize {
+                            VStack(alignment: .leading, spacing: 8) {
+                                amountField($ingredient)
+                                amountMaxField($ingredient)
+                                unitField($ingredient)
+                            }
+                        } else {
+                            HStack(spacing: 8) {
+                                amountField($ingredient)
+                                    .frame(maxWidth: 64)
 
-                            // Optional upper bound, for recipes that give a
-                            // range ("1-1.5 lb"). Left blank it stays nil and
-                            // the ingredient behaves exactly as before.
-                            Text("–")
-                                .foregroundStyle(Color.rvSubtleText)
+                                // Decorative: the fields carry their own
+                                // labels, so VoiceOver reading "en dash"
+                                // between them is noise on every row.
+                                Text("–")
+                                    .foregroundStyle(Color.rvSubtleText)
+                                    .accessibilityHidden(true)
 
-                            TextField("Max", text: ingredientAmountMaxBinding($ingredient))
-                                .frame(maxWidth: 64)
-                                .keyboardType(.decimalPad)
-                                .accessibilityLabel("Ingredient maximum amount, optional")
+                                amountMaxField($ingredient)
+                                    .frame(maxWidth: 64)
 
-                            TextField("Unit", text: $ingredient.unit)
-                                .frame(maxWidth: 96)
-                                .accessibilityLabel("Ingredient unit")
+                                unitField($ingredient)
+                                    .frame(maxWidth: 96)
+                            }
                         }
 
                         TextField("Ingredient name", text: $ingredient.name)
@@ -425,6 +434,23 @@ struct RecipeEditorView: View {
         case .manual:
             return nil
         }
+    }
+
+    private func amountField(_ ingredient: Binding<Ingredient>) -> some View {
+        TextField("Amount", text: ingredientAmountBinding(ingredient))
+            .keyboardType(.decimalPad)
+            .accessibilityLabel("Ingredient amount")
+    }
+
+    private func amountMaxField(_ ingredient: Binding<Ingredient>) -> some View {
+        TextField("Max", text: ingredientAmountMaxBinding(ingredient))
+            .keyboardType(.decimalPad)
+            .accessibilityLabel("Ingredient maximum amount, optional")
+    }
+
+    private func unitField(_ ingredient: Binding<Ingredient>) -> some View {
+        TextField("Unit", text: ingredient.unit)
+            .accessibilityLabel("Ingredient unit")
     }
 
     private func ingredientAmountBinding(_ ingredient: Binding<Ingredient>) -> Binding<String> {

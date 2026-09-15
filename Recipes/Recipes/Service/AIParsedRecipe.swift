@@ -71,17 +71,20 @@ struct AIParsedRecipe: Decodable {
     struct ParsedIngredient: Decodable {
         let name: String
         let amount: Double?
-        /// Upper bound when the model reports a range. It has no schema key
-        /// of its own: ranges arrive inside a STRING amount ("1-1.5") or in a
-        /// plain-string ingredient line, so both decode paths below fill it
-        /// without the prompt needing to change.
+        /// Upper bound when the model reports a range ("1-1.5 lbs", "8 to 12").
+        ///
+        /// Three ways in, because the model is inconsistent about shape: its
+        /// own `amountMax` key, which the prompts now ask for; a STRING
+        /// amount holding the whole range ("1-1.5"); or a plain-string
+        /// ingredient line routed through the shared parser. All three decode
+        /// paths below fill it.
         let amountMax: Double?
         let unit: String?
         let section: String?
         let isOptional: Bool?
 
         private enum CodingKeys: String, CodingKey {
-            case name, amount, unit, section, isOptional
+            case name, amount, amountMax, unit, section, isOptional
         }
 
         init(from decoder: Decoder) throws {

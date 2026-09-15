@@ -469,6 +469,7 @@ class URLRecipeScraperService: ObservableObject {
         {"title":"","summary":"","servings":4,"prepTime":0,"cookTime":0,"category":"dinner","cuisine":"","difficulty":"medium","tags":[],"ingredients":[{"name":"","amount":0,"amountMax":null,"unit":"","section":"","isOptional":false}],"steps":[{"order":1,"instruction":"","timerSeconds":null,"timerLabel":null}]}
         Category must be one of: breakfast, lunch, dinner, appetizer, snack, dessert, beverage, sauce, bread, soup, salad, side, other.
         Difficulty must be one of: easy, medium, hard, expert.
+        If an ingredient gives a RANGE ("1-1.5 lbs", "8 to 12 tortillas"), put the low end in amount and the high end in amountMax; otherwise leave amountMax null.
         Return ONLY valid JSON.
         """
 

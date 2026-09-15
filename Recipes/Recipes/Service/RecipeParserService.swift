@@ -364,6 +364,7 @@ class RecipeParserService: ObservableObject {
         - category: breakfast, lunch, dinner, appetizer, snack, dessert, beverage, sauce, bread, soup, salad, side, other
         - difficulty: easy, medium, hard, expert
         - For gram amounts like "150G", use amount: 150, unit: "g"
+        - if the recipe gives a RANGE ("1-1.5 lbs", "8 to 12 tortillas"), put the low end in amount and the high end in amountMax; otherwise leave amountMax null
         - Ignore social media handles, page numbers, watermarks
         - Return ONLY valid JSON array, no other text
         """
