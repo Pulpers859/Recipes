@@ -71,6 +71,11 @@ struct AIParsedRecipe: Decodable {
     struct ParsedIngredient: Decodable {
         let name: String
         let amount: Double?
+        /// Upper bound when the model reports a range. It has no schema key
+        /// of its own: ranges arrive inside a STRING amount ("1-1.5") or in a
+        /// plain-string ingredient line, so both decode paths below fill it
+        /// without the prompt needing to change.
+        let amountMax: Double?
         let unit: String?
         let section: String?
         let isOptional: Bool?
@@ -89,6 +94,7 @@ struct AIParsedRecipe: Decodable {
                 let parsed = IngredientLineParser.parse(line)
                 name = parsed.name
                 amount = parsed.amount > 0 ? parsed.amount : nil
+                amountMax = parsed.amountMax
                 unit = parsed.unit.isEmpty ? nil : parsed.unit
                 section = nil
                 isOptional = nil
@@ -99,12 +105,16 @@ struct AIParsedRecipe: Decodable {
             name = try c.decode(String.self, forKey: .name)
             if let value = try? c.decode(Double.self, forKey: .amount) {
                 amount = value
+                amountMax = nil
             } else if let text = try? c.decode(String.self, forKey: .amount) {
-                // "1/2", "1 1/2", "0.5" — reuse the shared fraction parser.
-                let parsed = IngredientLineParser.parseFractionAmount(text)
-                amount = parsed > 0 ? parsed : nil
+                // "1/2", "1 1/2", "0.5" — and "1-1.5" or "8 to 12", which the
+                // model emits as a string because JSON has no range type.
+                let parsed = IngredientLineParser.parseAmountRange(text)
+                amount = parsed.amount > 0 ? parsed.amount : nil
+                amountMax = parsed.amountMax
             } else {
                 amount = nil
+                amountMax = nil
             }
             unit = try? c.decode(String.self, forKey: .unit)
             section = try? c.decode(String.self, forKey: .section)
@@ -154,6 +164,7 @@ struct AIParsedRecipe: Decodable {
                     Ingredient(
                         name: $0.name.trimmingCharacters(in: .whitespacesAndNewlines),
                         amount: max($0.amount ?? 0, 0),
+                        amountMax: $0.amountMax,
                         unit: ($0.unit ?? "").trimmingCharacters(in: .whitespacesAndNewlines),
                         section: ($0.section ?? "").trimmingCharacters(in: .whitespacesAndNewlines),
                         isOptional: $0.isOptional ?? false

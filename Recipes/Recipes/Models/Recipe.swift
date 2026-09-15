@@ -84,6 +84,8 @@ final class Recipe {
             Ingredient(
                 name: ing.name,
                 amount: ing.amount * factor,
+                // Both ends scale, or a doubled recipe would read "2–1.5 lb".
+                amountMax: ing.amountMax.map { $0 * factor },
                 unit: ing.unit,
                 section: ing.section,
                 isOptional: ing.isOptional
@@ -98,21 +100,55 @@ struct Ingredient: Codable, Hashable, Identifiable {
     var id: UUID = UUID()
     var name: String
     var amount: Double
+    /// Upper bound when the recipe gives a range ("1-1.5 lb", "8 to 12
+    /// tortillas"). `amount` always holds the LOW end, so every existing
+    /// calculation that reads `amount` stays correct and conservative;
+    /// anything that needs the whole range opts in by reading this.
+    ///
+    /// Optional on purpose: the synthesized decoder uses `decodeIfPresent`,
+    /// so recipes saved before this existed — and every older backup file —
+    /// decode with `nil` and no migration. Older builds ignore the extra key,
+    /// so backups stay readable both directions.
+    var amountMax: Double?
     var unit: String
     var section: String  // e.g. "Sauce", "Dough", "Garnish" — groups in UI
     var isOptional: Bool
-    
-    init(name: String, amount: Double = 0, unit: String = "", section: String = "", isOptional: Bool = false) {
+
+    init(
+        name: String,
+        amount: Double = 0,
+        amountMax: Double? = nil,
+        unit: String = "",
+        section: String = "",
+        isOptional: Bool = false
+    ) {
         self.name = name
         self.amount = amount
+        self.amountMax = amountMax
         self.unit = unit
         self.section = section
         self.isOptional = isOptional
     }
-    
+
+    /// "2", or "1–1.5" when the recipe gave a range. An upper bound that
+    /// isn't actually above the lower one is ignored rather than rendered as
+    /// a degenerate "2–2".
+    var amountDisplay: String {
+        let low = AmountFormatter.format(amount)
+        guard let amountMax, amountMax > amount else { return low }
+        let high = AmountFormatter.format(amountMax)
+        guard !high.isEmpty else { return low }
+        return low.isEmpty ? high : "\(low)–\(high)"
+    }
+
+    var hasRange: Bool {
+        guard let amountMax else { return false }
+        return amountMax > amount
+    }
+
     var displayString: String {
-        let amtStr = AmountFormatter.format(amount)
-        if amount == 0 && unit.isEmpty { return name }
+        let amtStr = amountDisplay
+        if amount == 0 && amountMax == nil && unit.isEmpty { return name }
         // Join only non-empty parts so a missing amount never produces a
         // leading space (e.g. unit "cup" with amount 0).
         let parts = (unit.isEmpty || unit.lowercased() == name.lowercased())
@@ -145,6 +181,7 @@ struct Ingredient: Codable, Hashable, Identifiable {
                 Ingredient(
                     name: trimmedName,
                     amount: ingredient.amount,
+                    amountMax: ingredient.amountMax,
                     unit: trimmedUnit,
                     section: explicitSection.isEmpty ? currentSection : explicitSection,
                     isOptional: ingredient.isOptional

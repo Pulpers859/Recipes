@@ -93,11 +93,71 @@ final class IngredientLineParserTests: XCTestCase {
         XCTAssertEqual(ing.name, "cayenne pepper")
     }
 
-    func testHyphenRangeStillAverages() {
+    func testHyphenRangeKeepsBothBounds() {
+        // Used to average to 2.5 — a quantity that appears nowhere in the
+        // recipe and can't be shopped for.
         let ing = IngredientLineParser.parse("2-3 cups flour")
-        XCTAssertEqual(ing.amount, 2.5, accuracy: 0.001)
+        XCTAssertEqual(ing.amount, 2, accuracy: 0.001)
+        XCTAssertEqual(ing.amountMax ?? 0, 3, accuracy: 0.001)
         XCTAssertEqual(ing.unit.lowercased(), "cups")
         XCTAssertEqual(ing.name, "flour")
+    }
+
+    func testWordRangeSeparatorsAreParsed() {
+        // "8 to 12" used to leave "to 12" stranded in the ingredient NAME.
+        let tortillas = IngredientLineParser.parse("8 to 12 low carb tortillas")
+        XCTAssertEqual(tortillas.amount, 8, accuracy: 0.001)
+        XCTAssertEqual(tortillas.amountMax ?? 0, 12, accuracy: 0.001)
+        XCTAssertEqual(tortillas.name, "low carb tortillas")
+
+        let chicken = IngredientLineParser.parse("1-1.5 lbs boneless chicken breast")
+        XCTAssertEqual(chicken.amount, 1, accuracy: 0.001)
+        XCTAssertEqual(chicken.amountMax ?? 0, 1.5, accuracy: 0.001)
+        XCTAssertEqual(chicken.unit.lowercased(), "lbs")
+        XCTAssertEqual(chicken.name, "boneless chicken breast")
+
+        let cloves = IngredientLineParser.parse("2 or 3 cloves garlic")
+        XCTAssertEqual(cloves.amount, 2, accuracy: 0.001)
+        XCTAssertEqual(cloves.amountMax ?? 0, 3, accuracy: 0.001)
+    }
+
+    func testNonRangesDoNotGainAMaximum() {
+        // The separator needs a NUMBER after it, so none of these are ranges.
+        XCTAssertNil(IngredientLineParser.parse("2 cups flour").amountMax)
+        XCTAssertNil(IngredientLineParser.parse("salt and pepper to taste").amountMax)
+        XCTAssertNil(IngredientLineParser.parse("1 tablespoon olive oil").amountMax)
+        // "to" inside a word must not be mistaken for a separator.
+        let mixed = IngredientLineParser.parse("1 1/2 cups milk")
+        XCTAssertEqual(mixed.amount, 1.5, accuracy: 0.001)
+        XCTAssertNil(mixed.amountMax)
+    }
+
+    func testBackwardsRangeIsIgnored() {
+        // "3-2" is malformed; storing it would render as "3–2".
+        let ing = IngredientLineParser.parse("3-2 cups flour")
+        XCTAssertEqual(ing.amount, 3, accuracy: 0.001)
+        XCTAssertNil(ing.amountMax)
+    }
+
+    func testSizeQualifierIsStillNotARange() {
+        // The guard that must not regress: the hyphen here belongs to a size
+        // qualifier, not a range.
+        let ing = IngredientLineParser.parse("1 28-oz can San Marzano whole peeled tomatoes, drained")
+        XCTAssertEqual(ing.amount, 1, accuracy: 0.001)
+        XCTAssertNil(ing.amountMax)
+        XCTAssertEqual(ing.name, "28-oz can San Marzano whole peeled tomatoes, drained")
+    }
+
+    func testParseAmountRangeHandlesBareStrings() {
+        XCTAssertEqual(IngredientLineParser.parseAmountRange("1-1.5").amountMax ?? 0, 1.5, accuracy: 0.001)
+        XCTAssertEqual(IngredientLineParser.parseAmountRange("8 to 12").amount, 8, accuracy: 0.001)
+        XCTAssertNil(IngredientLineParser.parseAmountRange("1 1/2").amountMax)
+        XCTAssertEqual(IngredientLineParser.parseAmountRange("1 1/2").amount, 1.5, accuracy: 0.001)
+    }
+
+    func testServingsStillAverageARange() {
+        // Scalar fields keep averaging — "serves 4-6" really is about 5.
+        XCTAssertEqual(IngredientLineParser.parseFractionAmount("4-6"), 5, accuracy: 0.001)
     }
 
     func testCommaDecimalInLine() {

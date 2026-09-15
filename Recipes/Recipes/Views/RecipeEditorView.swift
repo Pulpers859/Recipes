@@ -237,12 +237,23 @@ struct RecipeEditorView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack(spacing: 12) {
                             TextField("Amount", text: ingredientAmountBinding($ingredient))
-                                .frame(maxWidth: 96)
+                                .frame(maxWidth: 76)
                                 .keyboardType(.decimalPad)
                                 .accessibilityLabel("Ingredient amount")
 
+                            // Optional upper bound, for recipes that give a
+                            // range ("1-1.5 lb"). Left blank it stays nil and
+                            // the ingredient behaves exactly as before.
+                            Text("–")
+                                .foregroundStyle(Color.rvSubtleText)
+
+                            TextField("Max", text: ingredientAmountMaxBinding($ingredient))
+                                .frame(maxWidth: 76)
+                                .keyboardType(.decimalPad)
+                                .accessibilityLabel("Ingredient maximum amount, optional")
+
                             TextField("Unit", text: $ingredient.unit)
-                                .frame(maxWidth: 120)
+                                .frame(maxWidth: 110)
                                 .accessibilityLabel("Ingredient unit")
                         }
 
@@ -423,6 +434,26 @@ struct RecipeEditorView: View {
         )
     }
 
+    /// Empty text means "no range", which is different from zero — so this
+    /// writes `nil` rather than 0, and refuses to store a maximum that isn't
+    /// above the minimum (which would render as a backwards "3–2").
+    private func ingredientAmountMaxBinding(_ ingredient: Binding<Ingredient>) -> Binding<String> {
+        Binding(
+            get: {
+                guard let maxValue = ingredient.wrappedValue.amountMax else { return "" }
+                return AmountFormatter.format(maxValue)
+            },
+            set: { text in
+                let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty, let value = IngredientLineParser.flexibleDouble(trimmed) else {
+                    ingredient.wrappedValue.amountMax = nil
+                    return
+                }
+                ingredient.wrappedValue.amountMax = value > ingredient.wrappedValue.amount ? value : nil
+            }
+        )
+    }
+
     private func addIngredient() {
         let name = newIngredientName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
@@ -477,6 +508,10 @@ struct RecipeEditorView: View {
                     Ingredient(
                         name: ingredient.name.trimmingCharacters(in: .whitespacesAndNewlines),
                         amount: ingredient.amount,
+                        // Rebuilding the struct here means every field has to
+                        // be carried explicitly; omitting this silently
+                        // discarded any range the moment the recipe was saved.
+                        amountMax: ingredient.amountMax,
                         unit: ingredient.unit.trimmingCharacters(in: .whitespacesAndNewlines),
                         section: ingredient.section.trimmingCharacters(in: .whitespacesAndNewlines),
                         isOptional: ingredient.isOptional

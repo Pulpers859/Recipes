@@ -50,37 +50,83 @@ enum IngredientLineParser {
     static func parse(_ rawLine: String) -> Ingredient {
         let cleaned = normalizeNotation(rawLine.trimmingCharacters(in: .whitespacesAndNewlines))
 
-        // Pattern: optional amount (a single quantity token, or a "2-3" range
-        // of two tokens), optional unit, then name. Size qualifiers like
-        // "1 400g can" keep the 400g in the name rather than summing amounts.
+        // Pattern: optional amount, optional unit, then name. The amount is a
+        // single quantity token, optionally followed by a range separator and
+        // a second token — captured SEPARATELY so "1-1.5 lb" keeps both ends
+        // instead of collapsing to the midpoint.
+        //
+        // The separators require surrounding whitespace for "to"/"or" so they
+        // can't match inside a word ("1 tablespoon" must not see "to"), while
+        // the hyphen form allows none ("2-3 cups"). Size qualifiers like
+        // "1 400g can" and "1 28-oz can" still keep their text in the name,
+        // because the separator has to be immediately followed by a number.
         // The \b after the unit prevents short units from eating the start of
         // ingredient names ("2 garlic" must not parse as unit "g" + "arlic").
-        let pattern = "^(\(numberToken)(?:\\s*-\\s*\(numberToken))?)?\\s*(?:(cups?|c|tbsp|tsp|tablespoons?|teaspoons?|oz|ounces?|lbs?|pounds?|g|grams?|kg|ml|milliliters?|liters?|l|pints?|quarts?|gallons?|pinch(?:es)?|dashe?s?|sprigs?|stalks?|cloves?|cans?|packages?|bunche?s?|sticks?|pieces?|slices?|heads?)\\b)?\\s*[.,]?\\s*(.+)"
+        let rangeSeparator = #"(?:\s*-\s*|\s+(?:to|or)\s+)"#
+        let pattern = "^(?:(\(numberToken))(?:\(rangeSeparator)(\(numberToken)))?)?\\s*(?:(cups?|c|tbsp|tsp|tablespoons?|teaspoons?|oz|ounces?|lbs?|pounds?|g|grams?|kg|ml|milliliters?|liters?|l|pints?|quarts?|gallons?|pinch(?:es)?|dashe?s?|sprigs?|stalks?|cloves?|cans?|packages?|bunche?s?|sticks?|pieces?|slices?|heads?)\\b)?\\s*[.,]?\\s*(.+)"
 
         if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) {
             let range = NSRange(cleaned.startIndex..., in: cleaned)
             if let match = regex.firstMatch(in: cleaned, range: range) {
-                let amountStr = match.range(at: 1).location != NSNotFound
-                    ? (Range(match.range(at: 1), in: cleaned).map { String(cleaned[$0]).trimmingCharacters(in: .whitespaces) } ?? "")
-                    : ""
-                let rawUnit = match.range(at: 2).location != NSNotFound
-                    ? (Range(match.range(at: 2), in: cleaned).map { String(cleaned[$0]).trimmingCharacters(in: .whitespaces) } ?? "")
-                    : ""
+                func captured(_ index: Int) -> String {
+                    guard match.range(at: index).location != NSNotFound else { return "" }
+                    return Range(match.range(at: index), in: cleaned)
+                        .map { String(cleaned[$0]).trimmingCharacters(in: .whitespaces) } ?? ""
+                }
+
+                let lowStr = captured(1)
+                let highStr = captured(2)
+                let rawUnit = captured(3)
                 let unit = rawUnit.lowercased() == "c" ? "cup" : rawUnit
-                let name = match.range(at: 3).location != NSNotFound
-                    ? (Range(match.range(at: 3), in: cleaned).map { String(cleaned[$0]).trimmingCharacters(in: .whitespaces) } ?? cleaned)
-                    : cleaned
+                let nameCapture = captured(4)
+                let name = nameCapture.isEmpty ? cleaned : nameCapture
 
-                let amount = parseFractionAmount(amountStr)
+                let amount = parseSingleAmount(lowStr)
+                // Only a genuinely higher bound counts. A malformed "3-2" or a
+                // second token that parses to zero is dropped rather than
+                // stored as a range that reads backwards.
+                let high = highStr.isEmpty ? 0 : parseSingleAmount(highStr)
+                let amountMax: Double? = high > amount ? high : nil
 
-                return Ingredient(name: name, amount: amount, unit: unit)
+                return Ingredient(name: name, amount: amount, amountMax: amountMax, unit: unit)
             }
         }
 
         return Ingredient(name: cleaned)
     }
 
-    /// Convert fraction strings to Double: "1 1/2" → 1.5, "¾" → 0.75, "2-3" → 2.5
+    /// Splits a free-text amount into its low and high bounds:
+    /// "1-1.5" → (1, 1.5), "8 to 12" → (8, 12), "2 cups" → (2, nil).
+    ///
+    /// Deliberately separate from `parseFractionAmount`, which averages a
+    /// range into a single scalar. Averaging is right for servings ("serves
+    /// 4-6" really is about 5) and wrong for ingredients, where 1.25 lb of
+    /// chicken is a number that appears nowhere in the recipe and can't be
+    /// shopped for.
+    static func parseAmountRange(_ str: String) -> (amount: Double, amountMax: Double?) {
+        let normalized = normalizeNotation(str.trimmingCharacters(in: .whitespacesAndNewlines))
+
+        guard let separator = normalized.range(
+            of: #"\s*-\s*|\s+(?:to|or)\s+"#,
+            options: [.regularExpression, .caseInsensitive]
+        ) else {
+            return (parseSingleAmount(normalized), nil)
+        }
+
+        let low = parseSingleAmount(
+            String(normalized[..<separator.lowerBound]).trimmingCharacters(in: .whitespaces)
+        )
+        let high = parseSingleAmount(
+            String(normalized[separator.upperBound...]).trimmingCharacters(in: .whitespaces)
+        )
+        return (low, high > low ? high : nil)
+    }
+
+    /// Convert fraction strings to Double: "1 1/2" → 1.5, "¾" → 0.75, "2-3" → 2.5.
+    ///
+    /// The range averaging here is for SCALAR fields — servings, prep and cook
+    /// times — where a single number is the only sensible answer. Ingredient
+    /// amounts go through `parseAmountRange` instead and keep both ends.
     static func parseFractionAmount(_ str: String) -> Double {
         // Handle ranges like "2-3" by averaging.
         if str.contains("-") {

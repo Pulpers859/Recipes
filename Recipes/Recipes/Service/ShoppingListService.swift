@@ -36,6 +36,13 @@ class ShoppingListService {
                 let baseKey = mergeKey(name: ingredient.name)
                 let normalizedUnit = normalizeUnit(ingredient.unit)
 
+                // Buy the TOP of a range. "1-1.5 lb chicken" means the recipe
+                // works with 1 lb and tolerates 1.5; coming home with 1 lb and
+                // discovering you needed more is the failure that costs a
+                // second trip, while the surplus keeps. `amount` stays the low
+                // end everywhere else — this is the one place that opts out.
+                let purchaseAmount = ingredient.amountMax ?? ingredient.amount
+
                 // Combine amounts only when the units are actually
                 // compatible. When they aren't ("2 cup flour" vs "500 g
                 // flour"), keep a separate line item scoped by unit FAMILY
@@ -46,7 +53,7 @@ class ShoppingListService {
                 var key = baseKey
                 if let existing = aggregated[baseKey],
                    convertToCommonUnit(
-                       amount: ingredient.amount,
+                       amount: purchaseAmount,
                        unit: ingredient.unit,
                        targetUnit: existing.unit
                    ) == nil {
@@ -55,7 +62,7 @@ class ShoppingListService {
 
                 if var existing = aggregated[key] {
                     if let converted = convertToCommonUnit(
-                        amount: ingredient.amount,
+                        amount: purchaseAmount,
                         unit: ingredient.unit,
                         targetUnit: existing.unit
                     ) {
@@ -69,7 +76,7 @@ class ShoppingListService {
                 } else {
                     aggregated[key] = AggregatedIngredient(
                         displayName: cleanDisplayName(ingredient.name),
-                        amount: ingredient.amount,
+                        amount: purchaseAmount,
                         unit: normalizedUnit,
                         category: categorize(ingredient: ingredient.name),
                         recipeIDs: [entry.recipe.id],
