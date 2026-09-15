@@ -38,6 +38,11 @@ nonisolated enum RecipeTextHeuristics {
     /// ("Stroganoff"), and no lowercase `fi` word appeared, so whether that
     /// ligature survives is simply unknown. No rule is guessed for a glyph
     /// that was not observed — inventing one risks corrupting good text.
+    ///
+    /// Also unhandled by design: a corrupted label with no space after it
+    /// ("MACROS&43C"). `recipeStartSupportRegexes` accepts the raw glyphs as a
+    /// backstop for that shape, so boundary detection still works even when
+    /// this pass leaves it alone.
     static func repairExtractedText(_ text: String) -> String {
         var repaired = text
         for rule in repairRules {
@@ -50,15 +55,34 @@ nonisolated enum RecipeTextHeuristics {
         return repaired
     }
 
-    /// Order matters: the label-colon rule must run before the word-slash
-    /// rule, or "MACROS% 43C" would be rewritten to a slash and stop looking
-    /// like a recipe heading.
+    /// ORDER IS LOAD-BEARING, in exactly one place: the ligature rules must
+    /// run FIRST. They are the only rules that produce letters, and the `%`
+    /// rules below key on a letter after the percent. A token carrying both
+    /// corruptions — which is expected, since one font subset produced both —
+    /// resolves correctly only in this order:
+    ///
+    ///     "salt%!our"  ->  "salt%flour"  ->  "salt/flour"
+    ///
+    /// Run the other way round, the slash never repairs and a second call to
+    /// this function would return something different from the first. As
+    /// written the whole pipeline is idempotent.
+    ///
+    /// The `%`-colon and `%`-slash rules, by contrast, can never fight: one
+    /// requires whitespace after the percent and the other a letter, so their
+    /// relative order is free.
     ///
     /// Templates here are plain literals on purpose. These go through
     /// `NSRegularExpression` template semantics, where `$` and `\` are
     /// special — any future rule whose replacement contains either must
     /// escape it.
     private static let repairRules: [(pattern: String, template: String)] = [
+        // "!our" -> "flour". "!" never legally appears at the START of a word,
+        // so a "!" that opens one is the fl ligature glyph. Requiring a
+        // non-letter before it keeps real exclamations ("enjoy!", "Wow!great")
+        // intact. Two rules so case is preserved: the source document writes
+        // ingredients in caps, where "!OUR" must become "FLOUR", not "flOUR".
+        (#"(?<!\p{L})!(?=\p{Ll})"#, "fl"),
+        (#"(?<!\p{L})!(?=\p{Lu})"#, "FL"),
         // "1 1%3 CUP" -> "1 1/3 CUP", "(93%7)" -> "(93/7)". Digits required on
         // BOTH sides, so a real percentage ("2% PLAIN GREEK YOGURT",
         // "93% lean") is never touched — those are followed by a space or the
@@ -67,23 +91,23 @@ nonisolated enum RecipeTextHeuristics {
         // "MACROS% 43C" -> "MACROS: 43C". The other corruption family: some
         // files render ':' as '%' rather than '&'. `recipeStartSupportRegexes`
         // below tolerates a bare '%' for exactly this reason; repairing it
-        // here is the fix that pattern was standing in for.
-        (#"(?<=\p{L})%(?=\s)"#, ":"),
+        // here is the fix that pattern was standing in for. End-of-string is
+        // accepted for the same reason as the ampersand rule — a page can end
+        // on its heading.
+        (#"(?<=\p{L})%(?=\s|$)"#, ":"),
         // "GARLIC SALT%PEPPER" -> "GARLIC SALT/PEPPER". A percent between two
         // letters is overwhelmingly a corrupted slash, though not
-        // unconditionally: percent-encoding ("caf%C3%A9") looks the same, so
-        // two hex digits after the percent veto the repair.
-        (#"(?<=\p{L})%(?![0-9A-Fa-f]{2})(?=\p{L})"#, "/"),
+        // unconditionally: percent-encoding ("caf%C3%A9") looks the same. The
+        // veto therefore requires a DIGIT in the following pair, which every
+        // common encoding has (%20, %2F, %C3, %A9) — vetoing on any two hex
+        // characters would also swallow "CHICKEN%BEEF", "RICE%BEANS" and
+        // "SALT%BACON", which are far likelier here than a URL.
+        (#"(?<=\p{L})%(?!(?:[0-9][0-9A-Fa-f]|[0-9A-Fa-f][0-9]))(?=\p{L})"#, "/"),
         // "MACROS& 43C" -> "MACROS: 43C". A letter before and whitespace after
         // is the signature of a corrupted colon; it leaves "GARLIC POWDER &
         // SALT", "LUNCH & DINNER", "M&M" and "AT&T" alone, since those all
         // have either a space before the ampersand or a letter after it.
         (#"(?<=\p{L})&(?=\s|$)"#, ":"),
-        // "!our" -> "flour". "!" never legally appears at the START of a word,
-        // so a "!" that opens one is the fl ligature glyph. Requiring a
-        // non-letter before it keeps real exclamations ("enjoy!", "Wow!great")
-        // intact.
-        (#"(?<!\p{L})!(?=\p{Ll})"#, "fl"),
     ]
 
     // MARK: - Recipe Boundary Detection
@@ -93,11 +117,18 @@ nonisolated enum RecipeTextHeuristics {
     /// cookbooks where one recipe spans pages can still split wrong — the
     /// import summary tells the user to verify multi-recipe results.
     private static let ingredientsRegex = try? NSRegularExpression(pattern: #"(?i)ingredients"#)
+    /// The `%` and `&` alternatives are a deliberate backstop, not laziness:
+    /// both are corrupted colons (see `repairExtractedText`). Repair normally
+    /// converts them upstream, but it needs whitespace after the glyph to be
+    /// confident, so a space-dropped heading like "MACROS&43C" reaches here
+    /// unrepaired. Accepting the raw glyph keeps boundary detection working
+    /// for that shape. `&` was previously missing while `%` was present,
+    /// which is what let a whole cookbook import as one merged recipe.
     private static let recipeStartSupportRegexes: [NSRegularExpression] = {
         [
-            #"(?i)macros\s*[:%]"#,
-            #"(?i)calories\s*[:%]"#,
-            #"(?i)servings\s*[:%]"#,
+            #"(?i)macros\s*[:%&]"#,
+            #"(?i)calories\s*[:%&]"#,
+            #"(?i)servings\s*[:%&]"#,
         ].compactMap { try? NSRegularExpression(pattern: $0) }
     }()
 

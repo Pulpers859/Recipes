@@ -57,6 +57,7 @@ class RecipeParserService: ObservableObject {
         let thinPageIndices = pageTexts.indices.filter {
             pageTexts[$0].trimmingCharacters(in: .whitespacesAndNewlines).count < 40
         }
+        var ocrReplacedPages: Set<Int> = []
         if !thinPageIndices.isEmpty {
             parseProgress = thinPageIndices.count == pageTexts.count
                 ? "No selectable text. Running OCR..."
@@ -68,22 +69,34 @@ class RecipeParserService: ObservableObject {
                 // real text like a decorative title page.
                 if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     pageTexts[index] = text
+                    ocrReplacedPages.insert(index)
                 }
             }
         }
 
-        // Repair subsetted-font corruption here, AFTER the OCR merge, so that
-        // every page is covered however its text was obtained. Two reasons it
-        // can't live in `extractTextByPage`: OCR replaces those pages
-        // wholesale a few lines above, and the thin-page threshold must judge
-        // the raw extracted text it was tuned against — the `!` -> `fl` rule
-        // lengthens strings, which could otherwise nudge a 39-character page
-        // past the cutoff and skip OCR it needed.
+        // Repair subsetted-font corruption on the pages that came from
+        // PDFKit, and only those.
         //
-        // Everything downstream reads the repaired text: boundary detection
-        // keys on "MACROS:", and the AI prompt gets the same string, so one
-        // pass here is what keeps both the split and the quantities correct.
-        pageTexts = pageTexts.map(RecipeTextHeuristics.repairExtractedText)
+        // It has to run here rather than in `extractTextByPage` so the
+        // thin-page threshold above still judges the raw extracted text it was
+        // tuned against — the `!` -> `fl` rule lengthens strings, which could
+        // otherwise nudge a 39-character page past the cutoff and skip OCR it
+        // needed.
+        //
+        // OCR'd pages are skipped on purpose. This corruption comes from a
+        // font's ToUnicode map not being applied; Vision reads rendered
+        // pixels and cannot produce it, so on those pages the rules have no
+        // true positives to find and only false ones to risk — a misread
+        // "1OO% WHOLE WHEAT" would otherwise become "1OO: WHOLE WHEAT".
+        //
+        // Everything downstream reads the result: boundary detection keys on
+        // "MACROS:", and the AI prompt gets the same string, so this one pass
+        // is what keeps both the split and the quantities correct.
+        pageTexts = pageTexts.indices.map { index in
+            ocrReplacedPages.contains(index)
+                ? pageTexts[index]
+                : RecipeTextHeuristics.repairExtractedText(pageTexts[index])
+        }
 
         let allText = pageTexts.joined(separator: "\n")
         if allText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

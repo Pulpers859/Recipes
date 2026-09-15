@@ -1,0 +1,9 @@
+{
+  "kind": "split",
+  "expectedChunkCount": 3,
+  "chunkMarkers": [
+    "CREAMY CAJUN SHRIMP PASTA",
+    "BEEF STROGANOFF",
+    "QUESO CHICKEN & RICE"
+  ]
+}

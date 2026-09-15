@@ -43,22 +43,75 @@ final class RecipeTextRepairTests: XCTestCase {
     }
 
     func testLabelColonsCorruptedToPercentAreRestored() {
-        // The other corruption family: some files render ':' as '%'. Repairing
-        // it must win over the word-slash rule, or the heading stops looking
-        // like a recipe start.
+        // The other corruption family: some files render ':' as '%' rather
+        // than '&'.
         XCTAssertEqual(
             RecipeTextHeuristics.repairExtractedText("MACROS% 43C 13F 38P"),
             "MACROS: 43C 13F 38P"
         )
+        // A page can end on its heading, same as the ampersand rule allows.
+        XCTAssertEqual(RecipeTextHeuristics.repairExtractedText("MACROS%"), "MACROS:")
     }
 
     func testPercentEncodingIsNotMistakenForASlash() {
         // "caf%C3%A9" has a letter on both sides of the first '%' and would
-        // otherwise be mangled; two hex digits after it veto the repair.
+        // otherwise be mangled.
         XCTAssertEqual(
             RecipeTextHeuristics.repairExtractedText("from caf%C3%A9 kitchen"),
             "from caf%C3%A9 kitchen"
         )
+    }
+
+    func testHexVetoDoesNotSwallowOrdinaryIngredientWords() {
+        // The veto needs a DIGIT in the pair. Vetoing on any two hex
+        // characters would also block these, since B/E/A/C/D/F are hex —
+        // and food words beginning with them are far commoner here than URLs.
+        XCTAssertEqual(
+            RecipeTextHeuristics.repairExtractedText("CHICKEN%BEEF"),
+            "CHICKEN/BEEF"
+        )
+        XCTAssertEqual(RecipeTextHeuristics.repairExtractedText("RICE%BEANS"), "RICE/BEANS")
+        XCTAssertEqual(RecipeTextHeuristics.repairExtractedText("SALT%BACON"), "SALT/BACON")
+    }
+
+    func testUppercaseLigatureKeepsItsCase() {
+        // The source document writes ingredients in caps, so "!OUR" has to
+        // become "FLOUR" rather than "flOUR".
+        XCTAssertEqual(RecipeTextHeuristics.repairExtractedText("1%2 CUP !OUR"), "1/2 CUP FLOUR")
+    }
+
+    // MARK: - Rule Ordering
+
+    func testLigatureRepairRunsBeforeTheSlashRules() {
+        // This is the ONE ordering dependency in the rule list, and the reason
+        // it is documented. The ligature rules are the only ones that produce
+        // letters, and the '%' rules key on a letter after the percent. A
+        // token carrying both corruptions — expected, since one font subset
+        // produced both — only resolves if the ligature is restored first.
+        XCTAssertEqual(
+            RecipeTextHeuristics.repairExtractedText("2 TBSP salt%!our"),
+            "2 TBSP salt/flour"
+        )
+    }
+
+    func testRepairIsIdempotent() {
+        // Running twice must equal running once, which is only true when the
+        // ligature rules come first. Guards against a reordering that
+        // reintroduces the under-repair above.
+        let samples = [
+            "2 TBSP salt%!our",
+            "1 1%3 CUP FAT-FREE HALF AND HALF",
+            "MACROS& 43C\nSERVINGS& 6",
+            "150G 2% PLAIN GREEK YOGURT",
+            "from caf%C3%A9 kitchen",
+            "Add queso over rice and enjoy!",
+            "1%2 CUP !OUR"
+        ]
+        for sample in samples {
+            let once = RecipeTextHeuristics.repairExtractedText(sample)
+            let twice = RecipeTextHeuristics.repairExtractedText(once)
+            XCTAssertEqual(once, twice, "repair is not idempotent for \(sample)")
+        }
     }
 
     func testFlLigatureIsRestored() {
