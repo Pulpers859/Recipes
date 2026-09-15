@@ -2,12 +2,15 @@ import Foundation
 
 /// Normalizes the loose, publisher-specific values found in schema.org Recipe
 /// JSON-LD into stable Recipe Vault fields.
-/// `nonisolated` because this is pure schema.org string normalization with no
-/// UI or actor state. Without it the type picks up the project's MainActor
-/// default isolation, and passing `normalizedLabel` as a function value to
-/// `map` from a synchronous nonisolated context warns — an error under the
-/// Swift 6 language mode. Same reasoning as `RecipeTextHeuristics`.
-nonisolated enum RecipeSchemaNormalizer {
+/// Isolation note: this type stays on the project's MainActor default,
+/// because `category(from:)` reads `RecipeCategory` — its initializer,
+/// `allCases`, `rawValue` and `Equatable` — and that enum is main-actor
+/// isolated too. Only the two pure string helpers below are `nonisolated`,
+/// which is all the warnings required: they are passed to `map` as function
+/// VALUES, and `map` is a nonisolated generic, so the conversion strips
+/// isolation. The `looksLikeMachineMetadata` call is inside a closure
+/// literal, which inherits the enclosing isolation and needs nothing.
+enum RecipeSchemaNormalizer {
     static func category(from candidates: [String]) -> RecipeCategory {
         let cleaned = candidates.map(normalizedLabel).filter { !$0.isEmpty }
 
@@ -125,12 +128,12 @@ nonisolated enum RecipeSchemaNormalizer {
         return values.filter { seen.insert($0).inserted }
     }
 
-    private static func normalizedLabel(_ value: String) -> String {
+    private nonisolated static func normalizedLabel(_ value: String) -> String {
         value.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private static func normalizedCuisine(_ value: String) -> String {
+    private nonisolated static func normalizedCuisine(_ value: String) -> String {
         normalizedLabel(value)
             .replacingOccurrences(
                 of: #"\s+cuisine$"#,

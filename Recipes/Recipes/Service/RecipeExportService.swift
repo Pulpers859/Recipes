@@ -254,6 +254,12 @@ class RecipeExportService {
         return formatter
     }()
 
+    /// Explicitly main-actor isolated. It already was, implicitly, via the
+    /// project default — but the decode path's correctness now DEPENDS on
+    /// that: `ImportWrapper` and `FailableDecodable` keep isolated
+    /// conformances, which only work when read from here. Making it implicit
+    /// would let a future `nonisolated` on the class silently break it.
+    @MainActor
     static func importFromJSON(data: Data) throws -> ImportResult {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .custom { decoder in
@@ -596,23 +602,11 @@ private nonisolated struct ExportWrapper: Codable {
     let shoppingItems: [ExportableShoppingItem]?
     let mealPlans: [ExportableMealPlan]?
 
-    nonisolated init(
-        version: Int,
-        exportDate: Date,
-        recipeCount: Int,
-        recipes: [ExportableRecipe],
-        pantryItems: [ExportablePantryItem]?,
-        shoppingItems: [ExportableShoppingItem]?,
-        mealPlans: [ExportableMealPlan]?
-    ) {
-        self.version = version
-        self.exportDate = exportDate
-        self.recipeCount = recipeCount
-        self.recipes = recipes
-        self.pantryItems = pantryItems
-        self.shoppingItems = shoppingItems
-        self.mealPlans = mealPlans
-    }
+    // No hand-written init: the synthesized memberwise one is identical and,
+    // now that the type is nonisolated, already callable from `encode`. The
+    // explicit version only ever existed to carry that modifier, and a
+    // hand-maintained copy of the stored-property list on a BACKUP-FORMAT
+    // type is exactly the shape of mistake that has bitten this file before.
 }
 
 /// Lenient counterpart used only for import. `version` is optional (older

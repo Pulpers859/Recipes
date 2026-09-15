@@ -305,8 +305,9 @@ enum Difficulty: String, Codable, CaseIterable {
     }
 }
 
-/// `nonisolated` so `Ingredient.amountDisplay` — itself nonisolated — can
-/// format without hopping to the main actor.
+/// `nonisolated` so the nonisolated `Ingredient.amountDisplay` can call it.
+/// A synchronous nonisolated member cannot hop actors, so without this it
+/// would simply fail to compile.
 nonisolated enum AmountFormatter {
     static func format(_ value: Double) -> String {
         if value == 0 { return "" }
