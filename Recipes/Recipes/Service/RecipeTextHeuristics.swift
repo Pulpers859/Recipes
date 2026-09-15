@@ -21,11 +21,16 @@ nonisolated enum RecipeTextHeuristics {
     /// arrived as `!` ("!our"), `/` as `%` ("1 1%3 CUP"), and `:` as `&`
     /// ("MACROS& 43C").
     ///
-    /// This is not cosmetic. `splitIntoRecipeChunks` looks for "MACROS:" to
-    /// find where a recipe starts, so the `&` corruption made a three-recipe
-    /// cookbook import as ONE merged recipe. It also corrupts quantities,
-    /// which is the thing this app most has to get right — "1 1%3 CUP" is not
-    /// a number anyone can shop from.
+    /// This is not cosmetic. It corrupts quantities, which is the thing this
+    /// app most has to get right — "1 1%3 CUP" is not a number anyone can
+    /// shop from — and it feeds the same damaged string to the AI parser.
+    ///
+    /// It also caused a three-recipe cookbook to import as ONE merged recipe:
+    /// `splitIntoRecipeChunks` scores a page by looking for "MACROS:", and a
+    /// corrupted "MACROS&" matched nothing. That particular symptom is now
+    /// covered twice over — `recipeStartSupportRegexes` accepts the raw glyphs
+    /// directly — so boundary detection no longer depends on this pass. The
+    /// quantities still do.
     ///
     /// Every rule is guarded so legitimate text survives. Measured on the
     /// source file these were derived from (a macro-style cookbook export),
@@ -38,6 +43,11 @@ nonisolated enum RecipeTextHeuristics {
     /// ("Stroganoff"), and no lowercase `fi` word appeared, so whether that
     /// ligature survives is simply unknown. No rule is guessed for a glyph
     /// that was not observed — inventing one risks corrupting good text.
+    ///
+    /// The ligature rules are the least certain of the set, because a digit
+    /// may legitimately precede one ("8!OZ" is 8 fl oz) and that blocks the
+    /// obvious guard. `!` followed by a single capital is therefore left
+    /// alone; two capitals are required. See the rule comments below.
     ///
     /// Also unhandled by design: a corrupted label with no space after it
     /// ("MACROS&43C"). `recipeStartSupportRegexes` accepts the raw glyphs as a
@@ -77,12 +87,23 @@ nonisolated enum RecipeTextHeuristics {
     /// escape it.
     private static let repairRules: [(pattern: String, template: String)] = [
         // "!our" -> "flour". "!" never legally appears at the START of a word,
-        // so a "!" that opens one is the fl ligature glyph. Requiring a
-        // non-letter before it keeps real exclamations ("enjoy!", "Wow!great")
-        // intact. Two rules so case is preserved: the source document writes
-        // ingredients in caps, where "!OUR" must become "FLOUR", not "flOUR".
-        (#"(?<!\p{L})!(?=\p{Ll})"#, "fl"),
-        (#"(?<!\p{L})!(?=\p{Lu})"#, "FL"),
+        // so a "!" that opens one is the fl ligature glyph. Two rules so case
+        // survives: the source writes ingredients in caps, where "!OUR" must
+        // become "FLOUR", not "flOUR".
+        //
+        // The lookbehind excludes "!" as well as letters. A doubled
+        // exclamation is emphatic prose, not a ligature, and PDF extraction
+        // routinely drops the space after it — without that, "Wow!!great"
+        // became "Wow!flgreat", and running this function twice gave a
+        // different answer than running it once.
+        //
+        // The uppercase rule demands TWO capitals because one is ambiguous: a
+        // digit may precede a real ligature ("8!OZ MILK" is 8 fl oz), so the
+        // lookbehind cannot exclude digits, which left "Serves 4!Enjoy"
+        // turning into "Serves 4FLEnjoy". "!OZ" and "!OUR" pass; "!Enjoy"
+        // does not.
+        (#"(?<![\p{L}!])!(?=\p{Ll})"#, "fl"),
+        (#"(?<![\p{L}!])!(?=\p{Lu}\p{Lu})"#, "FL"),
         // "1 1%3 CUP" -> "1 1/3 CUP", "(93%7)" -> "(93/7)". Digits required on
         // BOTH sides, so a real percentage ("2% PLAIN GREEK YOGURT",
         // "93% lean") is never touched — those are followed by a space or the
@@ -97,12 +118,20 @@ nonisolated enum RecipeTextHeuristics {
         (#"(?<=\p{L})%(?=\s|$)"#, ":"),
         // "GARLIC SALT%PEPPER" -> "GARLIC SALT/PEPPER". A percent between two
         // letters is overwhelmingly a corrupted slash, though not
-        // unconditionally: percent-encoding ("caf%C3%A9") looks the same. The
-        // veto therefore requires a DIGIT in the following pair, which every
-        // common encoding has (%20, %2F, %C3, %A9) — vetoing on any two hex
-        // characters would also swallow "CHICKEN%BEEF", "RICE%BEANS" and
-        // "SALT%BACON", which are far likelier here than a URL.
-        (#"(?<=\p{L})%(?!(?:[0-9][0-9A-Fa-f]|[0-9A-Fa-f][0-9]))(?=\p{L})"#, "/"),
+        // unconditionally: percent-encoding ("caf%C3%A9") looks the same.
+        //
+        // The veto is narrow on purpose. `(?=\p{L})` already requires a letter
+        // at that position, so the only encodings reachable here start with a
+        // hex LETTER; the veto rejects those whose second character is a digit
+        // (%C3, %A9, %E4 — the common UTF-8 lead bytes). Rejecting any two hex
+        // characters instead would also swallow "CHICKEN%BEEF", "RICE%BEANS"
+        // and "SALT%BACON", since B/E/A/C/D/F are hex, and food words are far
+        // likelier here than URLs.
+        //
+        // Accepted residual: an all-letter pair still repairs, so a percent-
+        // encoded BOM or CJK URL ("%EF%BB%BF") gets mangled. A damaged
+        // attribution link costs less than a damaged ingredient.
+        (#"(?<=\p{L})%(?![0-9A-Fa-f][0-9])(?=\p{L})"#, "/"),
         // "MACROS& 43C" -> "MACROS: 43C". A letter before and whitespace after
         // is the signature of a corrupted colon; it leaves "GARLIC POWDER &
         // SALT", "LUNCH & DINNER", "M&M" and "AT&T" alone, since those all

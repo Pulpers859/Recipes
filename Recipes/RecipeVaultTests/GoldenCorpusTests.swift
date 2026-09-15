@@ -19,7 +19,9 @@ final class GoldenCorpusTests: XCTestCase {
     // MARK: - Baselines (measured 2026-07-17; see header for the update rule)
     //
     // Measured: ingredient F1 0.8500, step F1 0.9844, title 1.0, amount 1.0
-    // (60 pairs), split 0.875. The gap to 1.0 is deliberate documentation of
+    // (60 pairs), split 0.8889 (8/9 since s09-corrupted-font-subset joined the
+    // split set; it passes, so the ratio rose from 7/8 and the baseline rises
+    // with it per the rule above). The gap to 1.0 is deliberate documentation of
     // current weaknesses: numbered ingredient lists (m04) and bulleted lists
     // (m13) parse badly, "1 28-oz can …" size qualifiers pollute names
     // (m06/m08), page furniture leaks into steps (m02), and traditional
@@ -30,7 +32,7 @@ final class GoldenCorpusTests: XCTestCase {
     private static let stepF1Baseline = 0.9843
     private static let titleAccuracyBaseline = 1.0
     private static let amountAccuracyBaseline = 1.0
-    private static let splitAccuracyBaseline = 0.875
+    private static let splitAccuracyBaseline = 0.888
 
     // MARK: - Corpus loading
 
@@ -146,10 +148,11 @@ final class GoldenCorpusTests: XCTestCase {
         for corpusCase in manualCases {
             let expected = corpusCase.expected
             // Repair first, mirroring production: `RecipeParserService` runs
-            // this over every page before either heuristic sees it, so a
-            // corpus that skipped it would be scoring a pipeline that doesn't
-            // ship. It is a no-op on every current case (none contain the
-            // characters it touches), so baselines are unaffected.
+            // this over every PDFKit-extracted page before either heuristic
+            // sees it, so a corpus that skipped it would be scoring a pipeline
+            // that doesn't ship. It is a no-op on all 16 manual cases (none
+            // contain the characters it touches), so manual baselines are
+            // unaffected; the split set has one case that does exercise it.
             let recipe = RecipeTextHeuristics.manualParse(
                 text: RecipeTextHeuristics.repairExtractedText(corpusCase.input),
                 pdfData: nil

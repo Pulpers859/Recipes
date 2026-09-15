@@ -95,9 +95,10 @@ final class RecipeTextRepairTests: XCTestCase {
     }
 
     func testRepairIsIdempotent() {
-        // Running twice must equal running once, which is only true when the
-        // ligature rules come first. Guards against a reordering that
-        // reintroduces the under-repair above.
+        // Running twice must equal running once. Two things break this if
+        // changed: reordering the ligature rules after the '%' rules, and
+        // letting a doubled "!" match the ligature guard (which made
+        // "!!a" -> "!fla" -> "flfla"). Both shapes are sampled below.
         let samples = [
             "2 TBSP salt%!our",
             "1 1%3 CUP FAT-FREE HALF AND HALF",
@@ -105,7 +106,12 @@ final class RecipeTextRepairTests: XCTestCase {
             "150G 2% PLAIN GREEK YOGURT",
             "from caf%C3%A9 kitchen",
             "Add queso over rice and enjoy!",
-            "1%2 CUP !OUR"
+            "1%2 CUP !OUR",
+            "!!a",
+            "Wow!!great",
+            "WOW!!!Amazing",
+            "8!OZ MILK",
+            "MACROS&43C"
         ]
         for sample in samples {
             let once = RecipeTextHeuristics.repairExtractedText(sample)
@@ -167,6 +173,26 @@ final class RecipeTextRepairTests: XCTestCase {
             RecipeTextHeuristics.repairExtractedText("Wow!great"),
             "Wow!great"
         )
+        // A doubled exclamation is emphasis, not a ligature. The second "!"
+        // has no letter before it, so only excluding "!" too keeps these
+        // intact — and this is what made the whole pass non-idempotent.
+        XCTAssertEqual(RecipeTextHeuristics.repairExtractedText("Wow!!great"), "Wow!!great")
+        XCTAssertEqual(
+            RecipeTextHeuristics.repairExtractedText("Delicious!!Enjoy"),
+            "Delicious!!Enjoy"
+        )
+        XCTAssertEqual(RecipeTextHeuristics.repairExtractedText("WOW!!!Amazing"), "WOW!!!Amazing")
+        // A digit may precede a REAL ligature, so the guard can't exclude
+        // digits; one capital after "!" is therefore not enough to trigger it.
+        XCTAssertEqual(
+            RecipeTextHeuristics.repairExtractedText("Serves 4!Enjoy your meal"),
+            "Serves 4!Enjoy your meal"
+        )
+    }
+
+    func testDigitPrecededLigatureStillRepairs() {
+        // The true positive the digit guard would have cost: 8 fl oz.
+        XCTAssertEqual(RecipeTextHeuristics.repairExtractedText("8!OZ MILK"), "8FLOZ MILK")
     }
 
     func testCleanTextIsUnchanged() {
@@ -193,14 +219,37 @@ final class RecipeTextRepairTests: XCTestCase {
         CALORIES& 444 PER SERVING
         SERVINGS& 6
         """
-        let corruptedChunks = RecipeTextHeuristics.splitIntoRecipeChunks(
-            pageTexts: [page, page, page]
-        )
-        XCTAssertEqual(corruptedChunks.count, 1, "precondition: corrupted pages merge into one")
-
         let repairedChunks = RecipeTextHeuristics.splitIntoRecipeChunks(
             pageTexts: [page, page, page].map(RecipeTextHeuristics.repairExtractedText)
         )
         XCTAssertEqual(repairedChunks.count, 3, "repaired pages split into three recipes")
+    }
+
+    func testBoundaryDetectionToleratesSpaceDroppedCorruptedLabels() {
+        // The shape repair deliberately leaves alone: with no whitespace after
+        // the glyph there isn't enough signal to call it a colon, so
+        // "MACROS&43C" survives the repair pass untouched. Boundary detection
+        // has to cope on its own, which is what the raw glyphs in
+        // `recipeStartSupportRegexes` are for. This is the only coverage that
+        // backstop has — the repair can't produce this input.
+        let page = """
+        Ingredients
+        • 1 LB FROZEN MEDIUM SHRIMP, DEVEINED WITH TAILS OFF
+        • 10OZ FARFALLE PASTA (UNCOOKED)
+        • 2 TBSP BUTTER
+        MACROS&43C 13F 38P
+        CALORIES&444
+        SERVINGS&6
+        """
+        XCTAssertEqual(
+            RecipeTextHeuristics.repairExtractedText(page),
+            page,
+            "precondition: repair leaves the space-dropped form alone"
+        )
+        XCTAssertEqual(
+            RecipeTextHeuristics.splitIntoRecipeChunks(pageTexts: [page, page, page]).count,
+            3,
+            "the support patterns must recognise the raw corrupted glyph"
+        )
     }
 }
